@@ -130,8 +130,21 @@ class BulkMediaRegisterAdmin {
 			wp_enqueue_style( 'jquery-datetimepicker', plugin_dir_url( __DIR__ ) . '/css/jquery.datetimepicker.css', array(), '2.3.4' );
 			wp_enqueue_script( 'jquery' );
 			wp_enqueue_script( 'jquery-datetimepicker', plugin_dir_url( __DIR__ ) . '/js/jquery.datetimepicker.js', null, '2.3.4', true );
+		}
+		if ( $this->is_my_plugin_screen1() || $this->is_select_register_screen() ) {
+			wp_enqueue_script( 'jquery' );
 			wp_enqueue_script( 'bulkmediaregister-admin-js', plugin_dir_url( __DIR__ ) . 'js/jquery.bulkmediaregister.admin.js', array( 'jquery' ), '1.00', false );
 		}
+	}
+
+	/** ==================================================
+	 * Select Register screen check
+	 *
+	 * @since 1.00
+	 */
+	private function is_select_register_screen() {
+		$screen = get_current_screen();
+		return is_object( $screen ) && 'bulk-media-register_page_bulkmediaregister-selectregister' === $screen->id;
 	}
 
 	/** ==================================================
