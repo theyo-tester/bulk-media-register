@@ -355,6 +355,16 @@ class BulkMediaRegister {
 		</select>
 		<label for="bulkmediaregister-searchdir-relative"><?php esc_html_e( 'Custom path relative to uploads:', 'bulk-media-register' ); ?></label>
 		<input id="bulkmediaregister-searchdir-relative" name="searchdir_relative" type="text" value="<?php echo esc_attr( isset( $bulkmediaregister_settings['custom_searchdir'] ) ? $bulkmediaregister_settings['custom_searchdir'] : '' ); ?>" placeholder="2024/events" />
+		<p class="description"><?php esc_html_e( 'Enter a path relative to:', 'bulk-media-register' ); ?> <code><?php echo esc_html( $this->upload_dir ); ?></code></p>
+		<p class="description">
+		<?php
+		if ( ! empty( $bulkmediaregister_settings['recursive_search'] ) ) {
+			esc_html_e( 'Recursive search is enabled; files in subfolders will be included.', 'bulk-media-register' );
+		} else {
+			esc_html_e( 'Recursive search is disabled; only files directly in the selected folder will be included. Enable it in Settings to include subfolders.', 'bulk-media-register' );
+		}
+		?>
+		</p>
 
 		<select name="extension" style="width: 120px;">
 		<?php
@@ -428,7 +438,7 @@ class BulkMediaRegister {
 			$searchdir = $this->resolve_upload_relative_directory( $bulkmediaregister_settings['custom_searchdir'] );
 			if ( false === $searchdir ) {
 				update_user_option( $uid, 'bulkmediaregister_files', array() );
-				echo '<div class="notice notice-error"><p>' . esc_html__( 'The custom path must be an existing directory inside the uploads folder.', 'bulk-media-register' ) . '</p></div>';
+				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the uploads directory. Enter a relative path such as "storage/2026" or an absolute path inside "%2$s".', 'bulk-media-register' ), $bulkmediaregister_settings['custom_searchdir'], $this->upload_dir ) ) . '</p></div>';
 				return;
 			}
 		} elseif ( empty( $bulkmediaregister_settings['searchdir'] ) ) {
@@ -437,7 +447,7 @@ class BulkMediaRegister {
 			$searchdir = ABSPATH . $bulkmediaregister_settings['searchdir'];
 		}
 		$extfilter = $bulkmediaregister_settings['extfilter'];
-		$recursive_search = $bulkmediaregister_settings['recursive_search'];
+		$recursive_search = isset( $bulkmediaregister_settings['recursive_search'] ) ? (bool) $bulkmediaregister_settings['recursive_search'] : true;
 
 		$allowed_mimes = array();
 		$mimes = get_allowed_mime_types( $uid );
@@ -467,7 +477,7 @@ class BulkMediaRegister {
 	private function resolve_upload_relative_directory( $relative_path ) {
 
 		$relative_path = wp_normalize_path( trim( $relative_path ) );
-		if ( '' === $relative_path || '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path ) ) {
+		if ( '' === $relative_path ) {
 			return false;
 		}
 
@@ -476,7 +486,9 @@ class BulkMediaRegister {
 			return false;
 		}
 
-		$resolved_dir = realpath( trailingslashit( $base_dir ) . $relative_path );
+		$is_absolute_path = '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path );
+		$path_to_resolve = $is_absolute_path ? $relative_path : trailingslashit( $base_dir ) . $relative_path;
+		$resolved_dir = realpath( $path_to_resolve );
 		if ( false === $resolved_dir || ! is_dir( $resolved_dir ) ) {
 			return false;
 		}
