@@ -22,7 +22,9 @@ jQuery(
 	function ($) {
 
 		/* Date Time Picker */
-		$( ':input[id^=datetimepicker-bulkmediaregister]' ).datetimepicker( {format:'Y-m-d H:i:s'} );
+		if ( $.fn.datetimepicker ) {
+			$( ':input[id^=datetimepicker-bulkmediaregister]' ).datetimepicker( {format:'Y-m-d H:i:s'} );
+		}
 
 		/* Folder source selector */
 		function toggleFolderSource() {

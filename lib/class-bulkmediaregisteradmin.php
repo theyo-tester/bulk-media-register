@@ -133,7 +133,7 @@ class BulkMediaRegisterAdmin {
 		}
 		if ( $this->is_my_plugin_screen1() || $this->is_select_register_screen() ) {
 			wp_enqueue_script( 'jquery' );
-			wp_enqueue_script( 'bulkmediaregister-admin-js', plugin_dir_url( __DIR__ ) . 'js/jquery.bulkmediaregister.admin.js', array( 'jquery' ), '1.00', false );
+			wp_enqueue_script( 'bulkmediaregister-admin-js', plugin_dir_url( __DIR__ ) . 'js/jquery.bulkmediaregister.admin.js', array( 'jquery' ), '1.01', false );
 		}
 	}
 
