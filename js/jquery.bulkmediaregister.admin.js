@@ -24,6 +24,15 @@ jQuery(
 		/* Date Time Picker */
 		$( ':input[id^=datetimepicker-bulkmediaregister]' ).datetimepicker( {format:'Y-m-d H:i:s'} );
 
+		/* Folder source selector */
+		function toggleFolderSource() {
+			var source = $( 'input[name="search_source"]:checked' ).val();
+			$( '#bulkmediaregister-uploads-source' ).prop( 'hidden', 'uploads' !== source );
+			$( '#bulkmediaregister-document-root-source' ).prop( 'hidden', 'document_root' !== source );
+		}
+		$( 'input[name="search_source"]' ).on( 'change', toggleFolderSource );
+		toggleFolderSource();
+
 		/* Control of the Enter key */
 		$( 'input[type!="submit"][type!="button"]' ).keypress(
 			function (e) {

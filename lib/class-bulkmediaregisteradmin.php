@@ -769,7 +769,9 @@ class BulkMediaRegisterAdmin {
 				} else {
 					$bulkmediaregister_settings['searchdir'] = null;
 				}
-				$bulkmediaregister_settings['custom_searchdir'] = isset( $_POST['searchdir_relative'] ) ? sanitize_text_field( wp_unslash( $_POST['searchdir_relative'] ) ) : '';
+				$search_source = isset( $_POST['search_source'] ) ? sanitize_key( wp_unslash( $_POST['search_source'] ) ) : 'uploads';
+				$bulkmediaregister_settings['search_source'] = in_array( $search_source, array( 'uploads', 'document_root' ), true ) ? $search_source : 'uploads';
+				$bulkmediaregister_settings['custom_document_root_path'] = isset( $_POST['searchdir_document_root'] ) ? sanitize_text_field( wp_unslash( $_POST['searchdir_document_root'] ) ) : '';
 				if ( ! empty( $_POST['extension'] ) ) {
 					$extfilter = sanitize_textarea_field( wp_unslash( $_POST['extension'] ) );
 					$bulkmediaregister_settings['extfilter'] = strtolower( $extfilter );
@@ -821,6 +823,8 @@ class BulkMediaRegisterAdmin {
 				'extfilter' => 'all',
 				'recursive_search' => true,
 				'custom_searchdir' => '',
+				'search_source' => 'uploads',
+				'custom_document_root_path' => '',
 				'per_page' => 20,
 				'dateset' => $dateset,
 				'datefixed' => $datefixed,
@@ -831,6 +835,26 @@ class BulkMediaRegisterAdmin {
 			update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_tbl );
 		} else {
 			$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', get_current_user_id() );
+			if ( ! array_key_exists( 'search_source', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['search_source'] = 'uploads';
+				$legacy_path = isset( $bulkmediaregister_settings['custom_searchdir'] ) ? wp_normalize_path( trim( $bulkmediaregister_settings['custom_searchdir'] ) ) : '';
+				$uploads = wp_upload_dir();
+				$uploads_root = realpath( $uploads['basedir'] );
+				$document_root = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : realpath( ABSPATH );
+				if ( '' !== $legacy_path && false !== $uploads_root && false !== $document_root ) {
+					$is_absolute = '/' === substr( $legacy_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $legacy_path );
+					$legacy_target = realpath( $is_absolute ? $legacy_path : trailingslashit( $uploads_root ) . $legacy_path );
+					$document_root = wp_normalize_path( $document_root );
+					if ( false !== $legacy_target ) {
+						$legacy_target = wp_normalize_path( $legacy_target );
+						if ( $legacy_target === $document_root || 0 === strpos( trailingslashit( $legacy_target ), trailingslashit( $document_root ) ) ) {
+							$bulkmediaregister_settings['search_source'] = 'document_root';
+							$bulkmediaregister_settings['custom_document_root_path'] = $legacy_target === $document_root ? '.' : ltrim( substr( $legacy_target, strlen( trailingslashit( $document_root ) ) ), '/' );
+						}
+					}
+				}
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
 			if ( ! array_key_exists( 'max_execution_time', $bulkmediaregister_settings ) ) {
 				$bulkmediaregister_settings['max_execution_time'] = ini_get( 'max_execution_time' );
 				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
@@ -853,6 +877,14 @@ class BulkMediaRegisterAdmin {
 			}
 			if ( ! array_key_exists( 'custom_searchdir', $bulkmediaregister_settings ) ) {
 				$bulkmediaregister_settings['custom_searchdir'] = '';
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
+			if ( ! array_key_exists( 'search_source', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['search_source'] = 'uploads';
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
+			if ( ! array_key_exists( 'custom_document_root_path', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['custom_document_root_path'] = '';
 				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
 			}
 		}

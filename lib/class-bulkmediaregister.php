@@ -98,6 +98,7 @@ class BulkMediaRegister {
 
 		/* for robots_txt */
 		add_filter( 'robots_txt', array( $this, 'custom_robots_txt' ), 9999 );
+		add_filter( 'wp_get_attachment_url', array( $this, 'external_attachment_url' ), 10, 2 );
 	}
 
 	/** ==================================================
@@ -135,6 +136,10 @@ class BulkMediaRegister {
 		$list = array();
 		if ( ! empty( $iterator ) ) {
 			foreach ( $iterator as $fileinfo ) {
+				if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
+					update_user_option( $uid, 'bulkmediaregister_files_break', true );
+					break;
+				}
 				if ( $fileinfo->isFile() ) {
 					$fullpath = wp_normalize_path( $fileinfo->getPathname() );
 					if ( ! in_array( $fullpath, $exclude_files ) ) {
@@ -142,10 +147,6 @@ class BulkMediaRegister {
 						if ( in_array( $check['type'], $allowed_mimes ) ) {
 							if ( 'all' === $extfilter || strtolower( $check['ext'] ) === $extfilter ) {
 								$list[] = $fullpath;
-								if ( time() - $start_time >= $exe_stop_diff_time ) {
-									update_user_option( $uid, 'bulkmediaregister_files_break', true );
-									break;
-								}
 							}
 						}
 					}
@@ -316,6 +317,8 @@ class BulkMediaRegister {
 		}
 
 		$wordpress_path = wp_normalize_path( ABSPATH );
+		$document_root = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : realpath( ABSPATH );
+		$search_source = isset( $bulkmediaregister_settings['search_source'] ) && 'document_root' === $bulkmediaregister_settings['search_source'] ? 'document_root' : 'uploads';
 
 		delete_user_option( $uid, 'bulkmediaregister_dirs_break' );
 		@set_time_limit( $bulkmediaregister_settings['max_execution_time'] );
@@ -327,6 +330,12 @@ class BulkMediaRegister {
 		?>
 		<form method="post" action="<?php echo esc_url( $scriptname ); ?>">
 		<?php wp_nonce_field( 'bmr_folder', 'bulk_media_register_folder' ); ?>
+		<fieldset>
+			<legend><?php esc_html_e( 'Folder source', 'bulk-media-register' ); ?></legend>
+			<label><input type="radio" name="search_source" value="uploads" <?php checked( 'uploads', $search_source ); ?>><?php esc_html_e( 'Choose a folder inside uploads', 'bulk-media-register' ); ?></label>
+			<label><input type="radio" name="search_source" value="document_root" <?php checked( 'document_root', $search_source ); ?>><?php esc_html_e( 'Enter a path relative to the public document root', 'bulk-media-register' ); ?></label>
+		</fieldset>
+		<div id="bulkmediaregister-uploads-source" <?php echo 'uploads' !== $search_source ? 'hidden' : ''; ?>>
 		<div style="font-size: small; font-weight: bold;"><code><?php echo esc_html( $wordpress_path ); ?></code></div>
 		<select name="searchdir">
 		<?php
@@ -357,9 +366,12 @@ class BulkMediaRegister {
 		}
 		?>
 		</select>
-		<label for="bulkmediaregister-searchdir-relative"><?php esc_html_e( 'Custom path relative to uploads:', 'bulk-media-register' ); ?></label>
-		<input id="bulkmediaregister-searchdir-relative" name="searchdir_relative" type="text" value="<?php echo esc_attr( isset( $bulkmediaregister_settings['custom_searchdir'] ) ? $bulkmediaregister_settings['custom_searchdir'] : '' ); ?>" placeholder="2024/events" />
-		<p class="description"><?php esc_html_e( 'Enter a path relative to:', 'bulk-media-register' ); ?> <code><?php echo esc_html( $this->upload_dir ); ?></code></p>
+		</div>
+		<div id="bulkmediaregister-document-root-source" <?php echo 'document_root' !== $search_source ? 'hidden' : ''; ?>>
+		<label for="bulkmediaregister-searchdir-document-root"><?php esc_html_e( 'Path relative to public document root:', 'bulk-media-register' ); ?></label>
+		<input id="bulkmediaregister-searchdir-document-root" name="searchdir_document_root" type="text" value="<?php echo esc_attr( isset( $bulkmediaregister_settings['custom_document_root_path'] ) ? $bulkmediaregister_settings['custom_document_root_path'] : '' ); ?>" placeholder="storage/2026" />
+		<p class="description"><?php esc_html_e( 'Public document root:', 'bulk-media-register' ); ?> <code><?php echo esc_html( $document_root ); ?></code></p>
+		</div>
 		<p class="description">
 		<?php
 		if ( ! empty( $bulkmediaregister_settings['recursive_search'] ) ) {
@@ -438,11 +450,13 @@ class BulkMediaRegister {
 
 		$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', $uid );
 
-		if ( ! empty( $bulkmediaregister_settings['custom_searchdir'] ) ) {
-			$searchdir = $this->resolve_upload_relative_directory( $bulkmediaregister_settings['custom_searchdir'] );
+		$search_source = isset( $bulkmediaregister_settings['search_source'] ) ? $bulkmediaregister_settings['search_source'] : 'uploads';
+		if ( 'document_root' === $search_source ) {
+			$custom_path = isset( $bulkmediaregister_settings['custom_document_root_path'] ) ? $bulkmediaregister_settings['custom_document_root_path'] : '';
+			$searchdir = $this->resolve_document_root_relative_directory( $custom_path );
 			if ( false === $searchdir ) {
 				update_user_option( $uid, 'bulkmediaregister_files', array() );
-				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the uploads directory or public site root. Relative paths start from "%2$s".', 'bulk-media-register' ), $bulkmediaregister_settings['custom_searchdir'], $this->upload_dir ) ) . '</p></div>';
+				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the public document root. Enter a relative path such as "storage/2026".', 'bulk-media-register' ), $custom_path ) ) . '</p></div>';
 				return;
 			}
 		} elseif ( empty( $bulkmediaregister_settings['searchdir'] ) ) {
@@ -463,9 +477,10 @@ class BulkMediaRegister {
 
 		delete_user_option( $uid, 'bulkmediaregister_files' );
 		delete_user_option( $uid, 'bulkmediaregister_files_break' );
-		@set_time_limit( $bulkmediaregister_settings['max_execution_time'] );
+		$max_execution_time = isset( $bulkmediaregister_settings['max_execution_time'] ) ? absint( $bulkmediaregister_settings['max_execution_time'] ) : absint( ini_get( 'max_execution_time' ) );
+		@set_time_limit( $max_execution_time );
 		$start_time = time();
-		$exe_stop_diff_time = intval( ini_get( 'max_execution_time' ) * 0.8 );
+		$exe_stop_diff_time = 0 < $max_execution_time ? max( 1, intval( $max_execution_time * 0.8 ) ) : 0;
 		$excludes = $this->excludes_strings( $uid );
 		$exclude_files = $this->search_db_files();
 		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time );
@@ -473,55 +488,140 @@ class BulkMediaRegister {
 	}
 
 	/** ==================================================
-	 * Resolve a path relative to the uploads directory.
+	 * Resolve a path relative to the public document root.
 	 *
-	 * @param string $relative_path  Path relative to uploads.
+	 * @param string $relative_path  Path relative to the document root.
 	 * @return string|false
 	 */
-	private function resolve_upload_relative_directory( $relative_path ) {
+	private function resolve_document_root_relative_directory( $relative_path ) {
 
 		$relative_path = wp_normalize_path( trim( $relative_path ) );
-		if ( '' === $relative_path ) {
+		if ( '' === $relative_path || '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path ) || in_array( '..', explode( '/', $relative_path ), true ) ) {
 			return false;
 		}
 
-		$base_dir = realpath( $this->upload_dir );
+		$base_dir = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : realpath( ABSPATH );
 		if ( false === $base_dir ) {
 			return false;
 		}
 
-		$is_absolute_path = '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path );
-		$path_to_resolve = $is_absolute_path ? $relative_path : trailingslashit( $base_dir ) . $relative_path;
-		$resolved_dir = realpath( $path_to_resolve );
+		$resolved_dir = realpath( trailingslashit( $base_dir ) . $relative_path );
 		if ( false === $resolved_dir || ! is_dir( $resolved_dir ) || ! is_readable( $resolved_dir ) ) {
 			return false;
 		}
 
+		$base_dir = wp_normalize_path( $base_dir );
 		$resolved_dir = wp_normalize_path( $resolved_dir );
-		$allowed_roots = array( $base_dir, realpath( ABSPATH ) );
-		if ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
-			$allowed_roots[] = realpath( $_SERVER['DOCUMENT_ROOT'] );
-		}
-		$inside_allowed_root = false;
-		foreach ( $allowed_roots as $allowed_root ) {
-			if ( false === $allowed_root ) {
-				continue;
-			}
-			$allowed_root = wp_normalize_path( $allowed_root );
-			if ( '/' === $allowed_root ) {
-				continue;
-			}
-			if ( $allowed_root !== $resolved_dir && 0 !== strpos( trailingslashit( $resolved_dir ), trailingslashit( $allowed_root ) ) ) {
-				continue;
-			}
-			$inside_allowed_root = true;
-			break;
-		}
-		if ( ! $inside_allowed_root ) {
+		if ( $base_dir !== $resolved_dir && 0 !== strpos( trailingslashit( $resolved_dir ), trailingslashit( $base_dir ) ) ) {
 			return false;
 		}
 
 		return $resolved_dir;
+	}
+
+	/**
+	 * Check whether a canonical path is inside uploads, WordPress, or the document root.
+	 *
+	 * @param string $path Canonical filesystem path.
+	 * @return bool
+	 */
+	private function path_is_inside_allowed_roots( $path ) {
+
+		$roots = array( $this->upload_dir, ABSPATH );
+		if ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$roots[] = $_SERVER['DOCUMENT_ROOT'];
+		}
+
+		foreach ( $roots as $root ) {
+			$root = realpath( $root );
+			if ( false === $root ) {
+				continue;
+			}
+			$root = wp_normalize_path( $root );
+			if ( '/' !== $root && ( $path === $root || 0 === strpos( trailingslashit( $path ), trailingslashit( $root ) ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Get a path relative to the uploads directory.
+	 *
+	 * @param string $file Canonical filesystem path.
+	 * @return string|false
+	 */
+	private function upload_relative_file_path( $file ) {
+
+		$base_parts = explode( '/', trim( wp_normalize_path( realpath( $this->upload_dir ) ), '/' ) );
+		$file_parts = explode( '/', trim( wp_normalize_path( realpath( $file ) ), '/' ) );
+		$common_parts = 0;
+		$limit = min( count( $base_parts ), count( $file_parts ) );
+		while ( $common_parts < $limit && $base_parts[ $common_parts ] === $file_parts[ $common_parts ] ) {
+			++$common_parts;
+		}
+
+		return str_repeat( '../', count( $base_parts ) - $common_parts ) . implode( '/', array_slice( $file_parts, $common_parts ) );
+	}
+
+	/**
+	 * Build the public URL for a file beneath uploads or the web document root.
+	 *
+	 * @param string $file Canonical filesystem path.
+	 * @return string
+	 */
+	private function public_file_url( $file ) {
+
+		$file = wp_normalize_path( realpath( $file ) );
+		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
+		if ( $uploads_root === $file || 0 === strpos( trailingslashit( $file ), trailingslashit( $uploads_root ) ) ) {
+			return trailingslashit( $this->upload_url ) . ltrim( $this->upload_relative_file_path( $file ), '/' );
+		}
+
+		$document_root = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false;
+		if ( false === $document_root ) {
+			return trailingslashit( $this->upload_url ) . $this->upload_relative_file_path( $file );
+		}
+
+		$document_root = wp_normalize_path( $document_root );
+		$relative_path = ltrim( substr( $file, strlen( trailingslashit( $document_root ) ) ), '/' );
+		$site_url_parts = wp_parse_url( home_url( '/' ) );
+		$origin = $site_url_parts['scheme'] . '://' . $site_url_parts['host'];
+		if ( ! empty( $site_url_parts['port'] ) ) {
+			$origin .= ':' . $site_url_parts['port'];
+		}
+		$encoded_path = implode( '/', array_map( 'rawurlencode', explode( '/', $relative_path ) ) );
+
+		return trailingslashit( $origin ) . $encoded_path;
+	}
+
+	/**
+	 * Use the web-root URL saved for externally stored attachments.
+	 *
+	 * @param string $url Attachment URL.
+	 * @param int    $attach_id Attachment ID.
+	 * @return string
+	 */
+	public function external_attachment_url( $url, $attach_id ) {
+
+		$attached_file = get_attached_file( $attach_id );
+		$real_file = $attached_file ? realpath( $attached_file ) : false;
+		if ( false === $real_file || ! is_file( $real_file ) ) {
+			return $url;
+		}
+
+		$real_file = wp_normalize_path( $real_file );
+		if ( ! $this->path_is_inside_allowed_roots( $real_file ) ) {
+			return $url;
+		}
+
+		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
+		if ( $uploads_root === $real_file || 0 === strpos( trailingslashit( $real_file ), trailingslashit( $uploads_root ) ) ) {
+			return $url;
+		}
+
+		return $this->public_file_url( $real_file );
 	}
 
 	/** ==================================================
@@ -562,8 +662,6 @@ class BulkMediaRegister {
 		$ext = $filetype['ext'];
 		$mime_type = $filetype['type'];
 		$file_type = wp_ext2type( $ext );
-		$new_url_attach = $this->upload_url . str_replace( $this->upload_dir, '', $file );
-
 		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
 		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
 		$wp_filesystem = new WP_Filesystem_Direct( false );
@@ -579,6 +677,7 @@ class BulkMediaRegister {
 			$file = $foldername_org . $filename;
 			$wp_filesystem->move( $file_org, $file );
 		}
+		$new_url_attach = $this->public_file_url( $file );
 
 		/* File Regist */
 		$newfile_post = array(
@@ -592,8 +691,7 @@ class BulkMediaRegister {
 		);
 		$attach_id = wp_insert_attachment( $newfile_post, $file );
 
-		/* for XAMPP [ get_attached_file( $attach_id ): Unable to get correct value ] */
-		$metapath_name = str_replace( $this->upload_dir . '/', '', $file );
+		$metapath_name = $this->upload_relative_file_path( $file );
 		update_post_meta( $attach_id, '_wp_attached_file', $metapath_name );
 
 		/* Date Time Regist */
@@ -629,6 +727,9 @@ class BulkMediaRegister {
 		/* Meta data Regist */
 		@set_time_limit( 300 );
 		$metadata = wp_generate_attachment_metadata( $attach_id, $file );
+		if ( ! empty( $metadata ) && is_array( $metadata ) ) {
+			$metadata['file'] = $metapath_name;
+		}
 		/* for 'big_image_size_threshold' and 'wp_image_maybe_exif_rotate' */
 		if ( ! empty( $metadata ) && array_key_exists( 'original_image', $metadata ) && ! empty( $metadata['original_image'] ) ) {
 			$metapath_scaled_rotated_file_name = str_replace( $this->upload_dir . '/', '', $metadata['file'] );
@@ -638,7 +739,7 @@ class BulkMediaRegister {
 		wp_update_attachment_metadata( $attach_id, $metadata );
 
 		/* Thumbnail urls */
-		list( $image_thumbnail, $imagethumburls ) = $this->thumbnail_urls( $attach_id, $metadata, $this->upload_url );
+		list( $image_thumbnail, $imagethumburls ) = $this->thumbnail_urls( $attach_id, $metadata );
 		/* Output datas*/
 		list( $attachment_link, $attachment_url, $original_image_url, $original_filename, $stamptime, $file_size, $length ) = $this->output_datas( $attach_id, $metadata, $file_type, $file );
 
@@ -829,11 +930,10 @@ class BulkMediaRegister {
 	 *
 	 * @param int    $attach_id  attach_id.
 	 * @param array  $metadata  metadata.
-	 * @param string $upload_url  upload_url.
 	 * @return array $image_thumbnail(string), $imagethumburls(array)
 	 * @since 1.01
 	 */
-	private function thumbnail_urls( $attach_id, $metadata, $upload_url ) {
+	private function thumbnail_urls( $attach_id, $metadata ) {
 
 		$image_attr_thumbnail = wp_get_attachment_image_src( $attach_id, 'thumbnail', true );
 		$image_thumbnail = $image_attr_thumbnail[0];
@@ -841,10 +941,7 @@ class BulkMediaRegister {
 		$imagethumburls = array();
 		if ( ! empty( $metadata ) && array_key_exists( 'sizes', $metadata ) ) {
 			$thumbnails  = $metadata['sizes'];
-			$path_file  = get_post_meta( $attach_id, '_wp_attached_file', true );
-			$filename   = wp_basename( $path_file );
-			$media_path = str_replace( $filename, '', $path_file );
-			$media_url  = $upload_url . '/' . $media_path;
+			$media_url  = trailingslashit( dirname( wp_get_attachment_url( $attach_id ) ) );
 			foreach ( $thumbnails as $key => $key2 ) {
 				$imagethumburls[ $key ] = $media_url . $key2['file'];
 			}
@@ -916,7 +1013,7 @@ class BulkMediaRegister {
 					$raw_file = sanitize_text_field( wp_unslash( $_POST['file'] ) );
 					/* Use `realpath()` to normalize the path to an absolute path and check whether it is within the upload directory */
 					$real_file = realpath( $raw_file );
-					if ( ! $real_file || ! $this->upload_dir || strpos( $real_file, $this->upload_dir ) !== 0 ) {
+					if ( ! $real_file || ! is_file( $real_file ) || ! is_readable( $real_file ) || ! $this->path_is_inside_allowed_roots( wp_normalize_path( $real_file ) ) ) {
 						status_header( '403' );
 						echo 'Forbidden';
 						wp_die();
