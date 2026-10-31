@@ -769,6 +769,7 @@ class BulkMediaRegisterAdmin {
 				} else {
 					$bulkmediaregister_settings['searchdir'] = null;
 				}
+				$bulkmediaregister_settings['custom_searchdir'] = isset( $_POST['searchdir_relative'] ) ? sanitize_text_field( wp_unslash( $_POST['searchdir_relative'] ) ) : '';
 				if ( ! empty( $_POST['extension'] ) ) {
 					$extfilter = sanitize_textarea_field( wp_unslash( $_POST['extension'] ) );
 					$bulkmediaregister_settings['extfilter'] = strtolower( $extfilter );
@@ -819,6 +820,7 @@ class BulkMediaRegisterAdmin {
 				'searchdir' => null,
 				'extfilter' => 'all',
 				'recursive_search' => true,
+				'custom_searchdir' => '',
 				'per_page' => 20,
 				'dateset' => $dateset,
 				'datefixed' => $datefixed,
@@ -843,6 +845,14 @@ class BulkMediaRegisterAdmin {
 			}
 			if ( ! array_key_exists( 'mail_send', $bulkmediaregister_settings ) ) {
 				$bulkmediaregister_settings['mail_send'] = true;
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
+			if ( ! array_key_exists( 'recursive_search', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['recursive_search'] = true;
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
+			if ( ! array_key_exists( 'custom_searchdir', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['custom_searchdir'] = '';
 				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
 			}
 		}

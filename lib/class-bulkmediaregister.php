@@ -353,6 +353,8 @@ class BulkMediaRegister {
 		}
 		?>
 		</select>
+		<label for="bulkmediaregister-searchdir-relative"><?php esc_html_e( 'Custom path relative to uploads:', 'bulk-media-register' ); ?></label>
+		<input id="bulkmediaregister-searchdir-relative" name="searchdir_relative" type="text" value="<?php echo esc_attr( isset( $bulkmediaregister_settings['custom_searchdir'] ) ? $bulkmediaregister_settings['custom_searchdir'] : '' ); ?>" placeholder="2024/events" />
 
 		<select name="extension" style="width: 120px;">
 		<?php
@@ -422,7 +424,14 @@ class BulkMediaRegister {
 
 		$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', $uid );
 
-		if ( empty( $bulkmediaregister_settings['searchdir'] ) ) {
+		if ( ! empty( $bulkmediaregister_settings['custom_searchdir'] ) ) {
+			$searchdir = $this->resolve_upload_relative_directory( $bulkmediaregister_settings['custom_searchdir'] );
+			if ( false === $searchdir ) {
+				update_user_option( $uid, 'bulkmediaregister_files', array() );
+				echo '<div class="notice notice-error"><p>' . esc_html__( 'The custom path must be an existing directory inside the uploads folder.', 'bulk-media-register' ) . '</p></div>';
+				return;
+			}
+		} elseif ( empty( $bulkmediaregister_settings['searchdir'] ) ) {
 			$searchdir = $this->upload_dir;
 		} else {
 			$searchdir = ABSPATH . $bulkmediaregister_settings['searchdir'];
@@ -447,6 +456,38 @@ class BulkMediaRegister {
 		$exclude_files = $this->search_db_files();
 		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time );
 		update_user_option( $uid, 'bulkmediaregister_files', $files );
+	}
+
+	/** ==================================================
+	 * Resolve a path relative to the uploads directory.
+	 *
+	 * @param string $relative_path  Path relative to uploads.
+	 * @return string|false
+	 */
+	private function resolve_upload_relative_directory( $relative_path ) {
+
+		$relative_path = wp_normalize_path( trim( $relative_path ) );
+		if ( '' === $relative_path || '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path ) ) {
+			return false;
+		}
+
+		$base_dir = realpath( $this->upload_dir );
+		if ( false === $base_dir ) {
+			return false;
+		}
+
+		$resolved_dir = realpath( trailingslashit( $base_dir ) . $relative_path );
+		if ( false === $resolved_dir || ! is_dir( $resolved_dir ) ) {
+			return false;
+		}
+
+		$base_dir = wp_normalize_path( $base_dir );
+		$resolved_dir = wp_normalize_path( $resolved_dir );
+		if ( $base_dir !== $resolved_dir && 0 !== strpos( trailingslashit( $resolved_dir ), trailingslashit( $base_dir ) ) ) {
+			return false;
+		}
+
+		return $resolved_dir;
 	}
 
 	/** ==================================================
