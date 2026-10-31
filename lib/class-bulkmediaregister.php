@@ -120,7 +120,11 @@ class BulkMediaRegister {
 		$iterator = $this->recursive_directory_iterator( $dir );
 
 		if ( $recursive_search ) {
-			$iterator = new RecursiveIteratorIterator( $iterator );
+			$iterator = new RecursiveIteratorIterator(
+				$iterator,
+				RecursiveIteratorIterator::LEAVES_ONLY,
+				RecursiveIteratorIterator::CATCH_GET_CHILD
+			);
 		}
 		$iterator = new RegexIterator( $iterator, $excludes, RecursiveRegexIterator::MATCH );
 		if ( ! empty( $search_text ) ) {
@@ -438,7 +442,7 @@ class BulkMediaRegister {
 			$searchdir = $this->resolve_upload_relative_directory( $bulkmediaregister_settings['custom_searchdir'] );
 			if ( false === $searchdir ) {
 				update_user_option( $uid, 'bulkmediaregister_files', array() );
-				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the uploads directory. Enter a relative path such as "storage/2026" or an absolute path inside "%2$s".', 'bulk-media-register' ), $bulkmediaregister_settings['custom_searchdir'], $this->upload_dir ) ) . '</p></div>';
+				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the uploads directory or public site root. Relative paths start from "%2$s".', 'bulk-media-register' ), $bulkmediaregister_settings['custom_searchdir'], $this->upload_dir ) ) . '</p></div>';
 				return;
 			}
 		} elseif ( empty( $bulkmediaregister_settings['searchdir'] ) ) {
@@ -489,13 +493,31 @@ class BulkMediaRegister {
 		$is_absolute_path = '/' === substr( $relative_path, 0, 1 ) || preg_match( '#^[A-Za-z]:/#', $relative_path );
 		$path_to_resolve = $is_absolute_path ? $relative_path : trailingslashit( $base_dir ) . $relative_path;
 		$resolved_dir = realpath( $path_to_resolve );
-		if ( false === $resolved_dir || ! is_dir( $resolved_dir ) ) {
+		if ( false === $resolved_dir || ! is_dir( $resolved_dir ) || ! is_readable( $resolved_dir ) ) {
 			return false;
 		}
 
-		$base_dir = wp_normalize_path( $base_dir );
 		$resolved_dir = wp_normalize_path( $resolved_dir );
-		if ( $base_dir !== $resolved_dir && 0 !== strpos( trailingslashit( $resolved_dir ), trailingslashit( $base_dir ) ) ) {
+		$allowed_roots = array( $base_dir, realpath( ABSPATH ) );
+		if ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$allowed_roots[] = realpath( $_SERVER['DOCUMENT_ROOT'] );
+		}
+		$inside_allowed_root = false;
+		foreach ( $allowed_roots as $allowed_root ) {
+			if ( false === $allowed_root ) {
+				continue;
+			}
+			$allowed_root = wp_normalize_path( $allowed_root );
+			if ( '/' === $allowed_root ) {
+				continue;
+			}
+			if ( $allowed_root !== $resolved_dir && 0 !== strpos( trailingslashit( $resolved_dir ), trailingslashit( $allowed_root ) ) ) {
+				continue;
+			}
+			$inside_allowed_root = true;
+			break;
+		}
+		if ( ! $inside_allowed_root ) {
 			return false;
 		}
 
