@@ -775,6 +775,8 @@ class BulkMediaRegisterAdmin {
 				$search_source = isset( $_POST['search_source'] ) ? sanitize_key( wp_unslash( $_POST['search_source'] ) ) : 'uploads';
 				$bulkmediaregister_settings['search_source'] = in_array( $search_source, array( 'uploads', 'document_root' ), true ) ? $search_source : 'uploads';
 				$bulkmediaregister_settings['custom_document_root_path'] = isset( $_POST['searchdir_document_root'] ) ? sanitize_text_field( wp_unslash( $_POST['searchdir_document_root'] ) ) : '';
+				$document_root = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : realpath( ABSPATH );
+				$bulkmediaregister_settings['custom_document_root_base'] = false !== $document_root ? wp_normalize_path( $document_root ) : wp_normalize_path( ABSPATH );
 				if ( ! empty( $_POST['extension'] ) ) {
 					$extfilter = sanitize_textarea_field( wp_unslash( $_POST['extension'] ) );
 					$bulkmediaregister_settings['extfilter'] = strtolower( $extfilter );
@@ -828,6 +830,7 @@ class BulkMediaRegisterAdmin {
 				'custom_searchdir' => '',
 				'search_source' => 'uploads',
 				'custom_document_root_path' => '',
+				'custom_document_root_base' => '',
 				'per_page' => 20,
 				'dateset' => $dateset,
 				'datefixed' => $datefixed,
@@ -888,6 +891,10 @@ class BulkMediaRegisterAdmin {
 			}
 			if ( ! array_key_exists( 'custom_document_root_path', $bulkmediaregister_settings ) ) {
 				$bulkmediaregister_settings['custom_document_root_path'] = '';
+				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
+			}
+			if ( ! array_key_exists( 'custom_document_root_base', $bulkmediaregister_settings ) ) {
+				$bulkmediaregister_settings['custom_document_root_base'] = '';
 				update_user_option( get_current_user_id(), 'bulkmediaregister', $bulkmediaregister_settings );
 			}
 		}

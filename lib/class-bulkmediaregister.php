@@ -525,9 +525,12 @@ class BulkMediaRegister {
 	 * @param string $path Canonical filesystem path.
 	 * @return bool
 	 */
-	private function path_is_inside_allowed_roots( $path ) {
+	private function path_is_inside_allowed_roots( $path, $additional_root = false ) {
 
 		$roots = array( $this->upload_dir, ABSPATH );
+		if ( $additional_root ) {
+			$roots[] = $additional_root;
+		}
 		if ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
 			$roots[] = $_SERVER['DOCUMENT_ROOT'];
 		}
@@ -571,7 +574,7 @@ class BulkMediaRegister {
 	 * @param string $file Canonical filesystem path.
 	 * @return string
 	 */
-	private function public_file_url( $file ) {
+	private function public_file_url( $file, $document_root = false ) {
 
 		$file = wp_normalize_path( realpath( $file ) );
 		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
@@ -579,12 +582,15 @@ class BulkMediaRegister {
 			return trailingslashit( $this->upload_url ) . ltrim( $this->upload_relative_file_path( $file ), '/' );
 		}
 
-		$document_root = ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false;
+		$document_root = $document_root ? realpath( $document_root ) : ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false );
 		if ( false === $document_root ) {
 			return trailingslashit( $this->upload_url ) . $this->upload_relative_file_path( $file );
 		}
 
 		$document_root = wp_normalize_path( $document_root );
+		if ( $document_root !== $file && 0 !== strpos( trailingslashit( $file ), trailingslashit( $document_root ) ) ) {
+			return trailingslashit( $this->upload_url ) . $this->upload_relative_file_path( $file );
+		}
 		$relative_path = ltrim( substr( $file, strlen( trailingslashit( $document_root ) ) ), '/' );
 		$site_url_parts = wp_parse_url( home_url( '/' ) );
 		$origin = $site_url_parts['scheme'] . '://' . $site_url_parts['host'];
@@ -605,6 +611,11 @@ class BulkMediaRegister {
 	 */
 	public function external_attachment_url( $url, $attach_id ) {
 
+		$stored_url = get_post_meta( $attach_id, '_bulkmediaregister_external_url', true );
+		if ( $stored_url ) {
+			return $stored_url;
+		}
+
 		$attached_file = get_attached_file( $attach_id );
 		$real_file = $attached_file ? realpath( $attached_file ) : false;
 		if ( false === $real_file || ! is_file( $real_file ) ) {
@@ -612,7 +623,10 @@ class BulkMediaRegister {
 		}
 
 		$real_file = wp_normalize_path( $real_file );
-		if ( ! $this->path_is_inside_allowed_roots( $real_file ) ) {
+		$author_id = (int) get_post_field( 'post_author', $attach_id );
+		$settings = get_user_option( 'bulkmediaregister', $author_id );
+		$document_root = isset( $settings['custom_document_root_base'] ) ? $settings['custom_document_root_base'] : false;
+		if ( ! $this->path_is_inside_allowed_roots( $real_file, $document_root ) ) {
 			return $url;
 		}
 
@@ -621,7 +635,7 @@ class BulkMediaRegister {
 			return $url;
 		}
 
-		return $this->public_file_url( $real_file );
+		return $this->public_file_url( $real_file, $document_root );
 	}
 
 	/** ==================================================
@@ -677,7 +691,8 @@ class BulkMediaRegister {
 			$file = $foldername_org . $filename;
 			$wp_filesystem->move( $file_org, $file );
 		}
-		$new_url_attach = $this->public_file_url( $file );
+		$document_root = isset( $bulkmediaregister_settings['custom_document_root_base'] ) ? $bulkmediaregister_settings['custom_document_root_base'] : false;
+		$new_url_attach = $this->public_file_url( $file, $document_root );
 
 		/* File Regist */
 		$newfile_post = array(
@@ -693,6 +708,11 @@ class BulkMediaRegister {
 
 		$metapath_name = $this->upload_relative_file_path( $file );
 		update_post_meta( $attach_id, '_wp_attached_file', $metapath_name );
+		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
+		$real_file = wp_normalize_path( realpath( $file ) );
+		if ( $uploads_root !== $real_file && 0 !== strpos( trailingslashit( $real_file ), trailingslashit( $uploads_root ) ) ) {
+			update_post_meta( $attach_id, '_bulkmediaregister_external_url', $new_url_attach );
+		}
 
 		/* Date Time Regist */
 		if ( function_exists( 'wp_date' ) ) {
@@ -1013,7 +1033,10 @@ class BulkMediaRegister {
 					$raw_file = sanitize_text_field( wp_unslash( $_POST['file'] ) );
 					/* Use `realpath()` to normalize the path to an absolute path and check whether it is within the upload directory */
 					$real_file = realpath( $raw_file );
-					if ( ! $real_file || ! is_file( $real_file ) || ! is_readable( $real_file ) || ! $this->path_is_inside_allowed_roots( wp_normalize_path( $real_file ) ) ) {
+					$uid = get_current_user_id();
+					$settings = get_user_option( 'bulkmediaregister', $uid );
+					$document_root = isset( $settings['custom_document_root_base'] ) ? $settings['custom_document_root_base'] : false;
+					if ( ! $real_file || ! is_file( $real_file ) || ! is_readable( $real_file ) || ! $this->path_is_inside_allowed_roots( wp_normalize_path( $real_file ), $document_root ) ) {
 						status_header( '403' );
 						echo 'Forbidden';
 						wp_die();
@@ -1032,7 +1055,6 @@ class BulkMediaRegister {
 					return;
 				}
 				/* Do not use an external UID; enforce the currently logged-in user ID. */
-				$uid = get_current_user_id();
 				if ( is_file( $file ) ) {
 					$output = apply_filters( 'bmr_regist', $file, $uid );
 
