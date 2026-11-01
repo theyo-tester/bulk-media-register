@@ -574,7 +574,7 @@ class BulkMediaRegister {
 	 * @param string $file Canonical filesystem path.
 	 * @return string
 	 */
-	private function public_file_url( $file, $document_root = false ) {
+	public function public_file_url( $file, $document_root = false ) {
 
 		$file = wp_normalize_path( realpath( $file ) );
 		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
@@ -1375,5 +1375,4 @@ class BulkMediaRegister {
 		<?php
 	}
 }
-
 

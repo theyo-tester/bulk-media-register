@@ -94,8 +94,8 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 
 				++$count;
 
-				$upload_path = wp_normalize_path( $bulkmediaregister->upload_dir );
-				$url = $bulkmediaregister->upload_url . str_replace( $upload_path, '', $file );
+				$document_root = isset( $bulkmediaregister_settings['custom_document_root_base'] ) ? $bulkmediaregister_settings['custom_document_root_base'] : false;
+				$url = $bulkmediaregister->public_file_url( $file, $document_root );
 				list( $title, $mime_type ) = $this->input_html( $file, $url, $count );
 				$date = get_date_from_gmt( gmdate( 'Y-m-d H:i:s', filemtime( $file ) ) );
 
