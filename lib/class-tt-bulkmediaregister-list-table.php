@@ -45,6 +45,13 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 	 */
 	public $max_items;
 
+	/**
+	 * Diagnostic shown when stored scan results produce no rows.
+	 *
+	 * @var string
+	 */
+	private $empty_results_diagnostic = '';
+
 	/** ==================================================
 	 * Construct
 	 *
@@ -73,7 +80,7 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 	 * @return array
 	 * @since 1.10
 	 */
-	private function read_data( $files ) {
+	private function read_data( $files, &$diagnostics ) {
 
 		$bulkmediaregister = new BulkMediaRegister();
 
@@ -86,14 +93,28 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		$exe_stop_diff_time = 0 < $runtime_limit ? max( 1, intval( $runtime_limit * 0.8 ) ) : 0;
 
 		$listtable_array = array();
+		$diagnostics = array(
+			'page_paths' => is_array( $files ) ? count( $files ) : 0,
+			'readable_paths' => 0,
+			'skipped_paths' => 0,
+			'generated_rows' => 0,
+			'interrupted' => false,
+		);
 		if ( ! empty( $files ) ) {
 			$count = 0;
 			foreach ( $files as $file ) {
 				if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
 					update_user_option( get_current_user_id(), 'bulkmediaregister_lists_break', true );
+					$diagnostics['interrupted'] = true;
 					break;
 				}
 
+				if ( ! is_string( $file ) || ! is_file( $file ) || ! is_readable( $file ) ) {
+					++$diagnostics['skipped_paths'];
+					continue;
+				}
+
+				++$diagnostics['readable_paths'];
 				++$count;
 
 				$document_root = isset( $bulkmediaregister_settings['custom_document_root_base'] ) ? $bulkmediaregister_settings['custom_document_root_base'] : false;
@@ -110,6 +131,7 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 					'filetype' => $mime_type,
 				);
 			}
+			$diagnostics['generated_rows'] = count( $listtable_array );
 
 			wp_enqueue_script( 'jquery' );
 			$handle  = 'bulkmediaregister-js';
@@ -156,6 +178,18 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		}
 
 		return $listtable_array;
+	}
+
+	/**
+	 * Display the reason the current result page is empty.
+	 *
+	 * @since 1.00
+	 */
+	public function no_items() {
+		parent::no_items();
+		if ( '' !== $this->empty_results_diagnostic ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html( $this->empty_results_diagnostic ) . '</p></div>';
+		}
 	}
 
 	/** ==================================================
@@ -711,7 +745,24 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		$this->max_items = $total_items;
 
 		$page_files = array_slice( $files, ( ( $current_page - 1 ) * $per_page ), $per_page );
-		$data = $this->read_data( $page_files );
+		$read_diagnostics = array();
+		$data = $this->read_data( $page_files, $read_diagnostics );
+		$this->empty_results_diagnostic = '';
+		if ( empty( $data ) ) {
+			$this->empty_results_diagnostic = sprintf(
+				/* translators: 1: stored scan paths, 2: current-page paths, 3: current page number, 4: readable paths, 5: generated rows, 6: skipped paths */
+				__( 'Select Register diagnostics: %1$d paths stored; %2$d paths on page %3$d; %4$d readable; %5$d rows generated; %6$d paths skipped as missing or unreadable.', 'bulk-media-register' ),
+				$total_items,
+				$read_diagnostics['page_paths'],
+				$current_page,
+				$read_diagnostics['readable_paths'],
+				$read_diagnostics['generated_rows'],
+				$read_diagnostics['skipped_paths']
+			);
+			if ( $read_diagnostics['interrupted'] ) {
+				$this->empty_results_diagnostic .= ' ' . __( 'Rendering stopped because the execution-time limit was reached.', 'bulk-media-register' );
+			}
+		}
 
 		/**
 		 * REQUIRED. Now we can add our *sorted* data to the items property, where
