@@ -943,6 +943,12 @@ class BulkMediaRegister {
 			$now_date_time = date_i18n( 'Y-m-d H:i:s' );
 		}
 
+		$real_file = realpath( $file );
+		if ( false === $real_file || ! is_file( $real_file ) || ! is_readable( $real_file ) ) {
+			return new WP_Error( 'bulkmediaregister_file_unavailable', __( 'The file is no longer available or readable for registration.', 'bulk-media-register' ) );
+		}
+		$file = wp_normalize_path( $real_file );
+
 		$filetype = wp_check_filetype( $file );
 		$ext = $filetype['ext'];
 		$mime_type = $filetype['type'];
@@ -952,13 +958,27 @@ class BulkMediaRegister {
 		/* for utf8mb4 charcter */
 		$title = $this->utf8mb4_html_numeric_encode( $title );
 		$filename = wp_basename( $file );
-		if ( ! is_file( $file ) || ! is_readable( $file ) ) {
-			return new WP_Error( 'bulkmediaregister_file_unavailable', __( 'The file is no longer available or readable for registration.', 'bulk-media-register' ) );
-		}
 		$document_root = isset( $bulkmediaregister_settings['custom_document_root_base'] ) ? $bulkmediaregister_settings['custom_document_root_base'] : false;
 		$new_url_attach = $this->public_file_url( $file, $document_root );
 		if ( '' === $new_url_attach ) {
 			return new WP_Error( 'bulkmediaregister_file_url_unavailable', __( 'Could not create a public URL for the file beneath the configured document root.', 'bulk-media-register' ) );
+		}
+
+		$uploads_root = realpath( $this->upload_dir );
+		$uploads_root = false !== $uploads_root ? wp_normalize_path( $uploads_root ) : '';
+		$is_uploads_file = '' !== $uploads_root && 0 === strpos( trailingslashit( $file ), trailingslashit( $uploads_root ) );
+		$metapath_name = $is_uploads_file ? ltrim( substr( $file, strlen( trailingslashit( $uploads_root ) ) ), '/' ) : $file;
+
+		$date_set = isset( $bulkmediaregister_settings['dateset'] ) ? $bulkmediaregister_settings['dateset'] : 'new';
+		if ( 'server' === $date_set ) {
+			$postdategmt = gmdate( 'Y-m-d H:i:s', filemtime( $file ) );
+			$postdate = get_date_from_gmt( $postdategmt );
+		} elseif ( 'fixed' === $date_set ) {
+			$postdate = isset( $bulkmediaregister_settings['datefixed'] ) ? $bulkmediaregister_settings['datefixed'] : current_time( 'mysql' );
+			$postdategmt = get_gmt_from_date( $postdate );
+		} else {
+			$postdate = current_time( 'mysql' );
+			$postdategmt = current_time( 'mysql', true );
 		}
 
 		/* File Regist */
@@ -966,44 +986,23 @@ class BulkMediaRegister {
 			'post_title' => $title,
 			'post_content' => '',
 			'post_author' => $uid,
+			'post_date' => $postdate,
+			'post_date_gmt' => $postdategmt,
+			'post_modified' => $postdate,
+			'post_modified_gmt' => $postdategmt,
 			'guid' => $new_url_attach,
 			'post_status' => 'inherit',
 			'post_type' => 'attachment',
 			'post_mime_type' => $mime_type,
 		);
 		$attach_id = wp_insert_attachment( $newfile_post, $file );
+		if ( is_wp_error( $attach_id ) || ! $attach_id ) {
+			return is_wp_error( $attach_id ) ? $attach_id : new WP_Error( 'bulkmediaregister_attachment_insert_failed', __( 'WordPress could not create the media attachment.', 'bulk-media-register' ) );
+		}
 
-		$metapath_name = $this->upload_relative_file_path( $file );
 		update_post_meta( $attach_id, '_wp_attached_file', $metapath_name );
-		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
-		$real_file = wp_normalize_path( realpath( $file ) );
-		if ( $uploads_root !== $real_file && 0 !== strpos( trailingslashit( $real_file ), trailingslashit( $uploads_root ) ) ) {
+		if ( ! $is_uploads_file ) {
 			update_post_meta( $attach_id, '_bulkmediaregister_external_url', $new_url_attach );
-		}
-
-		/* Date Time Regist */
-		if ( function_exists( 'wp_date' ) ) {
-			$postdategmt = wp_date( 'Y-m-d H:i:s', null, new DateTimeZone( 'UTC' ) );
-		} else {
-			$postdategmt = date_i18n( 'Y-m-d H:i:s', false, true );
-		}
-		if ( 'server' === $bulkmediaregister_settings['dateset'] ) {
-			$datetime = get_date_from_gmt( gmdate( 'Y-m-d H:i:s', filemtime( $file ) ) );
-			$postdategmt = get_gmt_from_date( $datetime );
-		}
-		if ( 'new' <> $bulkmediaregister_settings['dateset'] ) {
-			if ( 'fixed' === $bulkmediaregister_settings['dateset'] ) {
-				$postdategmt = get_gmt_from_date( $bulkmediaregister_settings['datefixed'] );
-			}
-			$postdate = get_date_from_gmt( $postdategmt );
-			$up_post = array(
-				'ID' => $attach_id,
-				'post_date' => $postdate,
-				'post_date_gmt' => $postdategmt,
-				'post_modified' => $postdate,
-				'post_modified_gmt' => $postdategmt,
-			);
-			wp_update_post( $up_post );
 		}
 
 		/* for wp_read_audio_metadata and wp_read_video_metadata */
@@ -1013,7 +1012,22 @@ class BulkMediaRegister {
 
 		/* Meta data Regist */
 		@set_time_limit( 300 );
+		clearstatcache( true, $file );
 		$metadata = wp_generate_attachment_metadata( $attach_id, $file );
+		if ( ! is_array( $metadata ) ) {
+			$metadata = array();
+		}
+		if ( 'audio' === $file_type && empty( $metadata['length_formatted'] ) ) {
+			$audio_metadata = wp_read_audio_metadata( $file );
+			if ( is_array( $audio_metadata ) ) {
+				$metadata = array_merge( $metadata, $audio_metadata );
+			}
+		} elseif ( 'video' === $file_type && empty( $metadata['length_formatted'] ) ) {
+			$video_metadata = wp_read_video_metadata( $file );
+			if ( is_array( $video_metadata ) ) {
+				$metadata = array_merge( $metadata, $video_metadata );
+			}
+		}
 		if ( ! empty( $metadata ) && is_array( $metadata ) ) {
 			$metadata['file'] = $metapath_name;
 		}
@@ -1263,10 +1277,10 @@ class BulkMediaRegister {
 
 		$stamptime = get_the_time( 'Y-n-j ', $attach_id ) . get_the_time( 'G:i:s', $attach_id );
 
-		if ( ! empty( $metadata ) && array_key_exists( 'filesize', $metadata ) && ! empty( $metadata['filesize'] ) ) {
+		clearstatcache( true, $file );
+		$file_size = @filesize( $file );
+		if ( false === $file_size && ! empty( $metadata['filesize'] ) ) {
 			$file_size = $metadata['filesize'];
-		} else {
-			$file_size = @filesize( $file );
 		}
 		if ( ! $file_size ) {
 			$file_size = __( 'Could not retrieve.', 'bulk-media-register' );
