@@ -17,6 +17,11 @@ if ( ! is_multisite() ) {
 	delete_option( 'bulkmediaregister_cash' );
 	$blogusers = get_users( array( 'fields' => array( 'ID' ) ) );
 	foreach ( $blogusers as $user ) {
+		$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', $user->ID );
+		if ( is_array( $bulkmediaregister_settings ) && isset( $bulkmediaregister_settings['scan_results']['file'] ) && is_string( $bulkmediaregister_settings['scan_results']['file'] ) && preg_match( '/^scan-results-[a-f0-9]{32}\.php$/', $bulkmediaregister_settings['scan_results']['file'] ) ) {
+			$uploads = wp_upload_dir();
+			wp_delete_file( trailingslashit( $uploads['basedir'] ) . 'bulk-media-register-tmp/' . $bulkmediaregister_settings['scan_results']['file'] );
+		}
 		$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
 		if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
 			for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
@@ -51,6 +56,11 @@ if ( ! is_multisite() ) {
 			)
 		);
 		foreach ( $blogusers as $user ) {
+			$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', $user->ID );
+			if ( is_array( $bulkmediaregister_settings ) && isset( $bulkmediaregister_settings['scan_results']['file'] ) && is_string( $bulkmediaregister_settings['scan_results']['file'] ) && preg_match( '/^scan-results-[a-f0-9]{32}\.php$/', $bulkmediaregister_settings['scan_results']['file'] ) ) {
+				$uploads = wp_upload_dir();
+				wp_delete_file( trailingslashit( $uploads['basedir'] ) . 'bulk-media-register-tmp/' . $bulkmediaregister_settings['scan_results']['file'] );
+			}
 			$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
 			if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
 				for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
