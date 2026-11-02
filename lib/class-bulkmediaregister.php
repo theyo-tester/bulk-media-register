@@ -118,17 +118,25 @@ class BulkMediaRegister {
 	 * @return array Files found during the scan.
 	 * @since 1.00
 	 */
-	private function scan_file( $dir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, &$scan_errors ) {
+	private function scan_file( $dir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, &$scan_errors, &$scan_stats ) {
 
 		$allowed_mimes = array_fill_keys( $allowed_mimes, true );
 		$searches = ! empty( $search_text ) ? '/(' . preg_quote( $search_text, '/' ) . ')/i' : false;
 		$directories = array( $dir );
 		$list = array();
+		$scan_stats = array(
+			'directories_scanned' => 0,
+			'extension_matches' => 0,
+			'filter_matches' => 0,
+			'mime_matches' => 0,
+			'registered_files' => 0,
+		);
 
 		while ( ! empty( $directories ) ) {
 			$current_dir = array_pop( $directories );
 			try {
 				$iterator = new DirectoryIterator( $current_dir );
+				++$scan_stats['directories_scanned'];
 				foreach ( $iterator as $fileinfo ) {
 					if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
 						update_user_option( $uid, 'bulkmediaregister_files_break', true );
@@ -139,22 +147,31 @@ class BulkMediaRegister {
 					}
 
 					$fullpath = wp_normalize_path( $fileinfo->getPathname() );
-					if ( $recursive_search && $fileinfo->isDir() && ! $fileinfo->isLink() ) {
-						$directories[] = $fullpath;
-						continue;
-					}
-					if ( ! $fileinfo->isFile() || ! preg_match( $excludes, $fullpath ) || ( false !== $searches && ! preg_match( $searches, $fullpath ) ) ) {
+					if ( $fileinfo->isDir() ) {
+						if ( $recursive_search && ! $fileinfo->isLink() && preg_match( $excludes, $fullpath ) ) {
+							$directories[] = $fullpath;
+						}
 						continue;
 					}
 					if ( 'all' !== $extfilter && strtolower( pathinfo( $fileinfo->getFilename(), PATHINFO_EXTENSION ) ) !== $extfilter ) {
 						continue;
 					}
+					if ( ! $fileinfo->isFile() ) {
+						continue;
+					}
+					++$scan_stats['extension_matches'];
+					if ( ! preg_match( $excludes, $fullpath ) || ( false !== $searches && ! preg_match( $searches, $fullpath ) ) ) {
+						continue;
+					}
+					++$scan_stats['filter_matches'];
 					if ( isset( $exclude_files[ $fullpath ] ) ) {
+						++$scan_stats['registered_files'];
 						continue;
 					}
 
 					$check = wp_check_filetype( $fullpath );
 					if ( isset( $allowed_mimes[ $check['type'] ] ) && ( 'all' === $extfilter || strtolower( $check['ext'] ) === $extfilter ) ) {
+						++$scan_stats['mime_matches'];
 						$list[] = $fullpath;
 					}
 				}
@@ -509,8 +526,23 @@ class BulkMediaRegister {
 		$excludes = $this->excludes_strings( $uid );
 		$exclude_files = $this->search_db_files( $searchdir );
 		$scan_errors = array();
-		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, $scan_errors );
+		$scan_stats = array();
+		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, $scan_errors, $scan_stats );
 		update_user_option( $uid, 'bulkmediaregister_files', $files );
+		if ( empty( $files ) && 'all' !== $extfilter ) {
+			echo '<div class="notice notice-info"><p>' . esc_html(
+				sprintf(
+					/* translators: 1: directories scanned, 2: extension matches, 3: files passing filters, 4: files accepted by WordPress, 5: files already registered */
+					__( 'Scan diagnostics for .%6$s: %1$d directories scanned; %2$d matching files encountered; %3$d passed search filters; %4$d passed WordPress file-type checks; %5$d were already registered.', 'bulk-media-register' ),
+					$scan_stats['directories_scanned'],
+					$scan_stats['extension_matches'],
+					$scan_stats['filter_matches'],
+					$scan_stats['mime_matches'],
+					$scan_stats['registered_files'],
+					$extfilter
+				)
+			) . '</p></div>';
+		}
 		if ( ! empty( $scan_errors ) ) {
 			$error_count = count( $scan_errors );
 			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( _n( 'Could not read %1$d directory during the scan. Files inside it were skipped.', 'Could not read %1$d directories during the scan. Files inside them were skipped.', $error_count, 'bulk-media-register' ), $error_count ) ) . '</p><ul>';
