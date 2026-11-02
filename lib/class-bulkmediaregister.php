@@ -528,19 +528,33 @@ class BulkMediaRegister {
 		$scan_errors = array();
 		$scan_stats = array();
 		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, $scan_errors, $scan_stats );
-		update_user_option( $uid, 'bulkmediaregister_files', $files );
+		$files_saved = update_user_option( $uid, 'bulkmediaregister_files', $files );
+		$stored_files = get_user_option( 'bulkmediaregister_files', $uid );
+		$stored_file_count = is_array( $stored_files ) ? count( $stored_files ) : 0;
 		if ( 'all' !== $extfilter ) {
 			echo '<div class="notice notice-info"><p>' . esc_html(
 				sprintf(
-					/* translators: 1: directories scanned, 2: extension matches, 3: files passing filters, 4: files accepted by WordPress, 5: files already registered, 6: extension, 7: files found */
-					__( 'Scan diagnostics for .%6$s: %1$d directories scanned; %2$d matching files encountered; %3$d passed search filters; %4$d passed WordPress file-type checks; %5$d were already registered; %7$d files found.', 'bulk-media-register' ),
+					/* translators: 1: directories scanned, 2: extension matches, 3: files passing filters, 4: files accepted by WordPress, 5: files already registered, 6: extension, 7: files found, 8: saved file count */
+					__( 'Scan diagnostics for .%6$s: %1$d directories scanned; %2$d matching files encountered; %3$d passed search filters; %4$d passed WordPress file-type checks; %5$d were already registered; %7$d files found; %8$d paths stored.', 'bulk-media-register' ),
 					$scan_stats['directories_scanned'],
 					$scan_stats['extension_matches'],
 					$scan_stats['filter_matches'],
 					$scan_stats['mime_matches'],
 					$scan_stats['registered_files'],
 					$extfilter,
-					count( $files )
+					count( $files ),
+					$stored_file_count
+				)
+			) . '</p></div>';
+		}
+		if ( count( $files ) !== $stored_file_count ) {
+			echo '<div class="notice notice-error"><p>' . esc_html(
+				sprintf(
+					/* translators: 1: files found by scan, 2: paths read back from user options, 3: update result */
+					__( 'Scan results could not be stored correctly: %1$d files found, %2$d paths read back from storage (user-option update returned %3$s).', 'bulk-media-register' ),
+					count( $files ),
+					$stored_file_count,
+					$files_saved ? __( 'success', 'bulk-media-register' ) : __( 'false', 'bulk-media-register' )
 				)
 			) . '</p></div>';
 		}
