@@ -178,14 +178,8 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 			$view_thumb_url = $this->create_cash( $ext, $file, $url );
 		} else if ( 'audio' === wp_ext2type( $ext ) ) {
 			$view_thumb_url = $this->siteurl() . '/' . WPINC . '/images/media/audio.png';
-			$metadata_audio = wp_read_audio_metadata( $file );
-			$file_size = size_format( $metadata_audio['filesize'] );
-			$length = $metadata_audio['length_formatted'];
 		} else if ( 'video' === wp_ext2type( $ext ) ) {
 			$view_thumb_url = $this->siteurl() . '/' . WPINC . '/images/media/video.png';
-			$metadata_video = wp_read_video_metadata( $file );
-			$file_size = size_format( $metadata_video['filesize'] );
-			$length = $metadata_video['length_formatted'];
 		} else {
 			$filetype2 = wp_ext2type( $ext );
 			if ( empty( $filetype2 ) ) {
@@ -199,9 +193,6 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		$input_html .= '<div><a href="' . $url . '" target="_blank" rel="noopener noreferrer" style="text-decoration: none; word-break: break-all;">' . $url . '</a></div>';
 
 		$input_html .= '<div>' . __( 'File size:', 'bulk-media-register' ) . ' ' . $file_size . '</div>';
-		if ( 'audio' === wp_ext2type( $ext ) || 'video' === wp_ext2type( $ext ) ) {
-			$input_html .= '<div>' . __( 'Length:', 'bulk-media-register' ) . ' ' . $length . '</div>';
-		}
 		$input_html .= '</div>';
 
 		return array( $input_html, $mime_type );
@@ -612,7 +603,8 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * First, lets decide how many records per page to show
 		 */
 		$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', get_current_user_id() );
-		$per_page = $bulkmediaregister_settings['per_page'];
+		$per_page = isset( $bulkmediaregister_settings['per_page'] ) ? absint( $bulkmediaregister_settings['per_page'] ) : 20;
+		$per_page = max( 1, $per_page );
 
 		/**
 		 * REQUIRED. Now we need to define our column headers. This includes a complete
@@ -706,7 +698,9 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * looking at. We'll need this later, so you should always include it in
 		 * your own package classes.
 		 */
-		$current_page = $this->get_pagenum();
+		$total_items = count( $files );
+		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
+		$current_page = min( $this->get_pagenum(), $total_pages );
 
 		/**
 		 * REQUIRED for pagination. Let's check how many items are in our data array.
@@ -714,7 +708,6 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * without filtering. We'll need this later, so you should always include it
 		 * in your own package classes.
 		 */
-		$total_items = count( $files );
 		$this->max_items = $total_items;
 
 		$page_files = array_slice( $files, ( ( $current_page - 1 ) * $per_page ), $per_page );
@@ -733,7 +726,7 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 			array(
 				'total_items' => $total_items,                  /* WE have to calculate the total number of items */
 				'per_page'    => $per_page,                     /* WE have to determine how many items to show on a page */
-				'total_pages' => ceil( $total_items / $per_page ),   /* WE have to calculate the total number of pages */
+				'total_pages' => $total_pages,   /* WE have to calculate the total number of pages */
 			)
 		);
 	}
