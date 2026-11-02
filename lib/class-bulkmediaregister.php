@@ -114,43 +114,52 @@ class BulkMediaRegister {
 	 * @param int    $uid  uid.
 	 * @param int    $start_time  start_time.
 	 * @param int    $exe_stop_diff_time  exe_stop_diff_time.
+	 * @param array  $scan_errors  Directories that could not be read.
+	 * @return array Files found during the scan.
 	 * @since 1.00
 	 */
-	private function scan_file( $dir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time ) {
+	private function scan_file( $dir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, &$scan_errors ) {
 
-		$iterator = $this->recursive_directory_iterator( $dir );
-
-		if ( $recursive_search ) {
-			$iterator = new RecursiveIteratorIterator(
-				$iterator,
-				RecursiveIteratorIterator::LEAVES_ONLY,
-				RecursiveIteratorIterator::CATCH_GET_CHILD
-			);
-		}
-		$iterator = new RegexIterator( $iterator, $excludes, RecursiveRegexIterator::MATCH );
-		if ( ! empty( $search_text ) ) {
-			$searches = '/(' . $search_text . ')/i';
-			$iterator = new RegexIterator( $iterator, $searches, RecursiveRegexIterator::MATCH );
-		}
-
+		$allowed_mimes = array_fill_keys( $allowed_mimes, true );
+		$searches = ! empty( $search_text ) ? '/(' . preg_quote( $search_text, '/' ) . ')/i' : false;
+		$directories = array( $dir );
 		$list = array();
-		if ( ! empty( $iterator ) ) {
-			foreach ( $iterator as $fileinfo ) {
-				if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
-					update_user_option( $uid, 'bulkmediaregister_files_break', true );
-					break;
-				}
-				if ( $fileinfo->isFile() ) {
+
+		while ( ! empty( $directories ) ) {
+			$current_dir = array_pop( $directories );
+			try {
+				$iterator = new DirectoryIterator( $current_dir );
+				foreach ( $iterator as $fileinfo ) {
+					if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
+						update_user_option( $uid, 'bulkmediaregister_files_break', true );
+						break 2;
+					}
+					if ( $fileinfo->isDot() ) {
+						continue;
+					}
+
 					$fullpath = wp_normalize_path( $fileinfo->getPathname() );
-					if ( ! in_array( $fullpath, $exclude_files ) ) {
-						$check = wp_check_filetype( $fullpath );
-						if ( in_array( $check['type'], $allowed_mimes ) ) {
-							if ( 'all' === $extfilter || strtolower( $check['ext'] ) === $extfilter ) {
-								$list[] = $fullpath;
-							}
-						}
+					if ( $recursive_search && $fileinfo->isDir() && ! $fileinfo->isLink() ) {
+						$directories[] = $fullpath;
+						continue;
+					}
+					if ( ! $fileinfo->isFile() || ! preg_match( $excludes, $fullpath ) || ( false !== $searches && ! preg_match( $searches, $fullpath ) ) ) {
+						continue;
+					}
+					if ( 'all' !== $extfilter && strtolower( pathinfo( $fileinfo->getFilename(), PATHINFO_EXTENSION ) ) !== $extfilter ) {
+						continue;
+					}
+					if ( isset( $exclude_files[ $fullpath ] ) ) {
+						continue;
+					}
+
+					$check = wp_check_filetype( $fullpath );
+					if ( isset( $allowed_mimes[ $check['type'] ] ) && ( 'all' === $extfilter || strtolower( $check['ext'] ) === $extfilter ) ) {
+						$list[] = $fullpath;
 					}
 				}
+			} catch ( UnexpectedValueException $e ) {
+				$scan_errors[] = $current_dir . ': ' . $e->getMessage();
 			}
 		}
 
@@ -184,37 +193,53 @@ class BulkMediaRegister {
 	/** ==================================================
 	 * Search DB
 	 *
-	 * @return string $exclude_files  exclude_files.
+	 * @param string $dir  Directory being scanned.
+	 * @return array $exclude_files  Registered file paths keyed for lookup.
 	 * @since 1.10
 	 */
-	private function search_db_files() {
+	private function search_db_files( $dir ) {
 
 		global $wpdb;
 
-		$files = $wpdb->get_col(
-			"
+		$upload_dir = realpath( $this->upload_dir );
+		$search_dir = realpath( $dir );
+		if ( false === $upload_dir || false === $search_dir ) {
+			return array();
+		}
+
+		$upload_dir = wp_normalize_path( $upload_dir );
+		$search_dir = wp_normalize_path( $search_dir );
+		if ( $search_dir !== $upload_dir && 0 !== strpos( trailingslashit( $search_dir ), trailingslashit( $upload_dir ) ) ) {
+			return array();
+		}
+
+		$relative_dir = ltrim( substr( $search_dir, strlen( $upload_dir ) ), '/' );
+		$sql = "
 			SELECT meta_value
 			FROM {$wpdb->prefix}postmeta
 			WHERE meta_key = '_wp_attached_file'
-			"
-		);
+		";
+		if ( '' !== $relative_dir ) {
+			$sql .= $wpdb->prepare( ' AND meta_value LIKE %s', $wpdb->esc_like( $relative_dir . '/' ) . '%' );
+		}
+		$files = $wpdb->get_col( $sql );
 
 		$exclude_files = array();
 		foreach ( $files as $file ) {
-			$file1 = trailingslashit( $this->upload_dir ) . $file;
-			$exclude_files[] = $file1;
+			$file1 = wp_normalize_path( trailingslashit( $this->upload_dir ) . $file );
+			$exclude_files[ $file1 ] = true;
 			if ( strpos( $file, '-scaled.' ) ) {
 				$basename1 = wp_basename( $file );
 				$filetype = wp_check_filetype( $basename1 );
 				$scaled = '-scaled.' . $filetype['ext'];
 				$file2 = rtrim( $file1, $scaled ) . '.' . $filetype['ext'];
-				$exclude_files[] = $file2;
+				$exclude_files[ $file2 ] = true;
 			} else if ( strpos( $file, '-rotated.' ) ) {
 				$basename1 = wp_basename( $file );
 				$filetype = wp_check_filetype( $basename1 );
 				$rotated = '-rotated.' . $filetype['ext'];
 				$file2 = rtrim( $file1, $rotated ) . '.' . $filetype['ext'];
-				$exclude_files[] = $file2;
+				$exclude_files[ $file2 ] = true;
 			}
 		}
 
@@ -482,9 +507,21 @@ class BulkMediaRegister {
 		$start_time = time();
 		$exe_stop_diff_time = 0 < $max_execution_time ? max( 1, intval( $max_execution_time * 0.8 ) ) : 0;
 		$excludes = $this->excludes_strings( $uid );
-		$exclude_files = $this->search_db_files();
-		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time );
+		$exclude_files = $this->search_db_files( $searchdir );
+		$scan_errors = array();
+		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, $scan_errors );
 		update_user_option( $uid, 'bulkmediaregister_files', $files );
+		if ( ! empty( $scan_errors ) ) {
+			$error_count = count( $scan_errors );
+			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( _n( 'Could not read %1$d directory during the scan. Files inside it were skipped.', 'Could not read %1$d directories during the scan. Files inside them were skipped.', $error_count, 'bulk-media-register' ), $error_count ) ) . '</p><ul>';
+			foreach ( array_slice( $scan_errors, 0, 5 ) as $scan_error ) {
+				echo '<li>' . esc_html( $scan_error ) . '</li>';
+			}
+			if ( 5 < $error_count ) {
+				echo '<li>' . esc_html( sprintf( __( 'And %1$d more unreadable directories.', 'bulk-media-register' ), $error_count - 5 ) ) . '</li>';
+			}
+			echo '</ul></div>';
+		}
 	}
 
 	/** ==================================================
@@ -1375,4 +1412,3 @@ class BulkMediaRegister {
 		<?php
 	}
 }
-
