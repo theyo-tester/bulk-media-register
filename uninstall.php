@@ -17,6 +17,13 @@ if ( ! is_multisite() ) {
 	delete_option( 'bulkmediaregister_cash' );
 	$blogusers = get_users( array( 'fields' => array( 'ID' ) ) );
 	foreach ( $blogusers as $user ) {
+		$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
+		if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
+			for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
+				delete_user_option( $user->ID, 'bulkmediaregister_files_chunk_' . $chunk, false );
+			}
+		}
+		delete_user_option( $user->ID, 'bulkmediaregister_files_manifest', false );
 		delete_user_option( $user->ID, 'bulkmediaregister', false );
 		delete_user_option( $user->ID, 'bulkmediaregister_files', false );
 		delete_user_option( $user->ID, 'bulkmediaregister_output', false );
@@ -44,6 +51,13 @@ if ( ! is_multisite() ) {
 			)
 		);
 		foreach ( $blogusers as $user ) {
+			$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
+			if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
+				for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
+					delete_user_option( $user->ID, 'bulkmediaregister_files_chunk_' . $chunk, false );
+				}
+			}
+			delete_user_option( $user->ID, 'bulkmediaregister_files_manifest', false );
 			delete_user_option( $user->ID, 'bulkmediaregister', false );
 			delete_user_option( $user->ID, 'bulkmediaregister_files', false );
 			delete_user_option( $user->ID, 'bulkmediaregister_output', false );

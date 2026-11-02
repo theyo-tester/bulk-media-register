@@ -224,7 +224,12 @@ class BulkMediaRegisterAdmin {
 							if ( get_user_option( 'bulkmediaregister_files_break', get_current_user_id() ) ) {
 								echo '<div class="notice notice-warning is-dismissible"><ul><li>' . esc_html__( 'The search was interrupted because the timeout was approaching. After registering the following searched files, search the remaining files again. If the number of searches is extremely low, it\'s because you have too many files to search. You need to increase the execution time. Increase the "max_execution_time" in "php.ini".', 'bulk-media-register' ) . '</li></ul></div>';
 							}
-							$files = get_user_option( 'bulkmediaregister_files', get_current_user_id() );
+							global $bulkmediaregister;
+							$files = $bulkmediaregister->get_scan_files( get_current_user_id() );
+							if ( is_wp_error( $files ) ) {
+								echo '<div class="notice notice-error"><p>' . esc_html( $files->get_error_message() ) . '</p></div>';
+								$files = array();
+							}
 							if ( ! empty( $files ) ) {
 								wp_enqueue_script( 'jquery' );
 								$handle  = 'bulkmediaregister-js';

@@ -101,6 +101,115 @@ class BulkMediaRegister {
 		add_filter( 'wp_get_attachment_url', array( $this, 'external_attachment_url' ), 10, 2 );
 	}
 
+	/**
+	 * Store scan results in small user-option chunks.
+	 *
+	 * @param int   $uid   User ID.
+	 * @param array $files Files found during the scan.
+	 * @return true|WP_Error
+	 */
+	public function save_scan_files( $uid, $files ) {
+
+		$files = array_values( $files );
+		$old_manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
+		$old_chunk_count = is_array( $old_manifest ) && isset( $old_manifest['chunks'] ) ? absint( $old_manifest['chunks'] ) : 0;
+		$chunks = array_chunk( $files, 100 );
+
+		foreach ( $chunks as $index => $chunk ) {
+			$option_name = 'bulkmediaregister_files_chunk_' . $index;
+			update_user_option( $uid, $option_name, $chunk );
+			if ( get_user_option( $option_name, $uid ) !== $chunk ) {
+				return new WP_Error(
+					'bulkmediaregister_scan_storage_failed',
+					sprintf(
+						/* translators: %d: result chunk number */
+						__( 'Could not save scan results in storage (chunk %d).', 'bulk-media-register' ),
+						$index + 1
+					)
+				);
+			}
+		}
+
+		$manifest = array(
+			'version' => 1,
+			'chunks' => count( $chunks ),
+			'count' => count( $files ),
+		);
+		update_user_option( $uid, 'bulkmediaregister_files_manifest', $manifest );
+		if ( get_user_option( 'bulkmediaregister_files_manifest', $uid ) !== $manifest ) {
+			return new WP_Error(
+				'bulkmediaregister_scan_storage_failed',
+				__( 'Could not finalize saved scan results.', 'bulk-media-register' )
+			);
+		}
+
+		for ( $index = count( $chunks ); $index < $old_chunk_count; ++$index ) {
+			delete_user_option( $uid, 'bulkmediaregister_files_chunk_' . $index );
+		}
+		delete_user_option( $uid, 'bulkmediaregister_files' );
+
+		return true;
+	}
+
+	/**
+	 * Load scan results, supporting the legacy single-option format.
+	 *
+	 * @param int $uid User ID.
+	 * @return array|WP_Error
+	 */
+	public function get_scan_files( $uid ) {
+
+		$manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
+		if ( false === $manifest ) {
+			$files = get_user_option( 'bulkmediaregister_files', $uid );
+			return is_array( $files ) ? $files : array();
+		}
+		if ( ! is_array( $manifest ) || ! isset( $manifest['version'], $manifest['chunks'], $manifest['count'] ) || 1 !== absint( $manifest['version'] ) ) {
+			return new WP_Error( 'bulkmediaregister_scan_storage_invalid', __( 'Saved scan results have an invalid storage manifest.', 'bulk-media-register' ) );
+		}
+
+		$files = array();
+		$chunk_count = absint( $manifest['chunks'] );
+		for ( $index = 0; $index < $chunk_count; ++$index ) {
+			$chunk = get_user_option( 'bulkmediaregister_files_chunk_' . $index, $uid );
+			if ( ! is_array( $chunk ) ) {
+				return new WP_Error(
+					'bulkmediaregister_scan_storage_incomplete',
+					sprintf(
+						/* translators: %d: result chunk number */
+						__( 'Saved scan results are incomplete (chunk %d is missing).', 'bulk-media-register' ),
+						$index + 1
+					)
+				);
+			}
+			$files = array_merge( $files, $chunk );
+		}
+
+		if ( count( $files ) !== absint( $manifest['count'] ) ) {
+			return new WP_Error( 'bulkmediaregister_scan_storage_incomplete', __( 'Saved scan results do not match their recorded file count.', 'bulk-media-register' ) );
+		}
+
+		return $files;
+	}
+
+	/**
+	 * Remove saved scan results before starting a new scan.
+	 *
+	 * @param int $uid User ID.
+	 * @return void
+	 */
+	private function clear_scan_files( $uid ) {
+
+		$manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
+		if ( is_array( $manifest ) && isset( $manifest['chunks'] ) ) {
+			for ( $index = 0; $index < absint( $manifest['chunks'] ); ++$index ) {
+				delete_user_option( $uid, 'bulkmediaregister_files_chunk_' . $index );
+			}
+		}
+		delete_user_option( $uid, 'bulkmediaregister_files_manifest' );
+		delete_user_option( $uid, 'bulkmediaregister_files' );
+	}
+
 	/** ==================================================
 	 * Scan file
 	 *
@@ -497,7 +606,7 @@ class BulkMediaRegister {
 			$custom_path = isset( $bulkmediaregister_settings['custom_document_root_path'] ) ? $bulkmediaregister_settings['custom_document_root_path'] : '';
 			$searchdir = $this->resolve_document_root_relative_directory( $custom_path );
 			if ( false === $searchdir ) {
-				update_user_option( $uid, 'bulkmediaregister_files', array() );
+				$this->clear_scan_files( $uid );
 				echo '<div class="notice notice-error"><p>' . esc_html( sprintf( __( 'The custom path "%1$s" could not be resolved inside the public document root. Enter a relative path such as "storage/2026".', 'bulk-media-register' ), $custom_path ) ) . '</p></div>';
 				return;
 			}
@@ -517,7 +626,7 @@ class BulkMediaRegister {
 		$allowed_mimes = array_unique( $allowed_mimes );
 		$allowed_mimes = array_values( $allowed_mimes );
 
-		delete_user_option( $uid, 'bulkmediaregister_files' );
+		$this->clear_scan_files( $uid );
 		delete_user_option( $uid, 'bulkmediaregister_files_break' );
 		$max_execution_time = isset( $bulkmediaregister_settings['max_execution_time'] ) ? absint( $bulkmediaregister_settings['max_execution_time'] ) : absint( ini_get( 'max_execution_time' ) );
 		@set_time_limit( $max_execution_time );
@@ -528,8 +637,8 @@ class BulkMediaRegister {
 		$scan_errors = array();
 		$scan_stats = array();
 		$files = $this->scan_file( $searchdir, $extfilter, $recursive_search, $excludes, $search_text, $exclude_files, $allowed_mimes, $uid, $start_time, $exe_stop_diff_time, $scan_errors, $scan_stats );
-		$files_saved = update_user_option( $uid, 'bulkmediaregister_files', $files );
-		$stored_files = get_user_option( 'bulkmediaregister_files', $uid );
+		$files_saved = $this->save_scan_files( $uid, $files );
+		$stored_files = $this->get_scan_files( $uid );
 		$stored_file_count = is_array( $stored_files ) ? count( $stored_files ) : 0;
 		if ( 'all' !== $extfilter ) {
 			echo '<div class="notice notice-info"><p>' . esc_html(
@@ -547,14 +656,15 @@ class BulkMediaRegister {
 				)
 			) . '</p></div>';
 		}
-		if ( count( $files ) !== $stored_file_count ) {
+		if ( is_wp_error( $files_saved ) || is_wp_error( $stored_files ) || count( $files ) !== $stored_file_count ) {
+			$storage_error = is_wp_error( $files_saved ) ? $files_saved->get_error_message() : ( is_wp_error( $stored_files ) ? $stored_files->get_error_message() : __( 'The saved file count does not match the scan result.', 'bulk-media-register' ) );
 			echo '<div class="notice notice-error"><p>' . esc_html(
 				sprintf(
-					/* translators: 1: files found by scan, 2: paths read back from user options, 3: update result */
-					__( 'Scan results could not be stored correctly: %1$d files found, %2$d paths read back from storage (user-option update returned %3$s).', 'bulk-media-register' ),
+					/* translators: 1: storage error, 2: files found by scan, 3: paths read back from user options */
+					__( 'Scan results could not be stored correctly: %1$s %2$d files found, %3$d paths read back from storage.', 'bulk-media-register' ),
+					$storage_error,
 					count( $files ),
-					$stored_file_count,
-					$files_saved ? __( 'success', 'bulk-media-register' ) : __( 'false', 'bulk-media-register' )
+					$stored_file_count
 				)
 			) . '</p></div>';
 		}

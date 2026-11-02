@@ -161,7 +161,12 @@ class BulkMediaRegisterCron {
 
 		$search_text = get_user_option( 'bulkmediaregister_wpcron_search_text', $uid );
 		do_action( 'bmr_search_files', $uid, $search_text );
-		$files = get_user_option( 'bulkmediaregister_files', $uid );
+		global $bulkmediaregister;
+		$files = $bulkmediaregister->get_scan_files( $uid );
+		if ( is_wp_error( $files ) ) {
+			error_log( 'Bulk Media Register: ' . $files->get_error_message() );
+			$files = array();
+		}
 		if ( ! empty( $files ) ) {
 			$start_time = time();
 			$exe_stop_diff_time = intval( ini_get( 'max_execution_time' ) * 0.8 );
@@ -190,7 +195,12 @@ class BulkMediaRegisterCron {
 	public function croncli( $uid, $search_text ) {
 
 		do_action( 'bmr_search_files', $uid, $search_text );
-		$files = get_user_option( 'bulkmediaregister_files', $uid );
+		global $bulkmediaregister;
+		$files = $bulkmediaregister->get_scan_files( $uid );
+		if ( is_wp_error( $files ) ) {
+			error_log( 'Bulk Media Register: ' . $files->get_error_message() );
+			return array();
+		}
 		$outputs = array();
 		if ( ! empty( $files ) ) {
 			foreach ( $files as $file ) {

@@ -668,7 +668,12 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * use sort and pagination data to build a custom query instead, as you'll
 		 * be able to use your precisely-queried data immediately.
 		 */
-		$files = get_user_option( 'bulkmediaregister_files', get_current_user_id() );
+		global $bulkmediaregister;
+		$files = $bulkmediaregister->get_scan_files( get_current_user_id() );
+		if ( is_wp_error( $files ) ) {
+			$this->empty_results_diagnostic = $files->get_error_message();
+			$files = array();
+		}
 		$files = is_array( $files ) ? $files : array();
 
 		/**
@@ -747,8 +752,7 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		$page_files = array_slice( $files, ( ( $current_page - 1 ) * $per_page ), $per_page );
 		$read_diagnostics = array();
 		$data = $this->read_data( $page_files, $read_diagnostics );
-		$this->empty_results_diagnostic = '';
-		if ( empty( $data ) ) {
+		if ( empty( $this->empty_results_diagnostic ) && empty( $data ) ) {
 			$this->empty_results_diagnostic = sprintf(
 				/* translators: 1: stored scan paths, 2: current-page paths, 3: current page number, 4: readable paths, 5: generated rows, 6: skipped paths */
 				__( 'Select Register diagnostics: %1$d paths stored; %2$d paths on page %3$d; %4$d readable; %5$d rows generated; %6$d paths skipped as missing or unreadable.', 'bulk-media-register' ),
