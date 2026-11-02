@@ -827,30 +827,50 @@ class BulkMediaRegister {
 	 */
 	public function public_file_url( $file, $document_root = false ) {
 
-		$file = wp_normalize_path( realpath( $file ) );
-		$uploads_root = wp_normalize_path( realpath( $this->upload_dir ) );
+		$file = realpath( $file );
+		$uploads_root = realpath( $this->upload_dir );
+		if ( false === $file || false === $uploads_root ) {
+			return '';
+		}
+		$file = wp_normalize_path( $file );
+		$uploads_root = wp_normalize_path( $uploads_root );
 		if ( $uploads_root === $file || 0 === strpos( trailingslashit( $file ), trailingslashit( $uploads_root ) ) ) {
 			return trailingslashit( $this->upload_url ) . ltrim( $this->upload_relative_file_path( $file ), '/' );
 		}
 
-		$document_root = $document_root ? realpath( $document_root ) : ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false );
-		if ( false === $document_root ) {
-			return trailingslashit( $this->upload_url ) . $this->upload_relative_file_path( $file );
+		$document_roots = array( $document_root );
+		if ( ! empty( $_SERVER['DOCUMENT_ROOT'] ) ) {
+			$document_roots[] = $_SERVER['DOCUMENT_ROOT'];
+		}
+		$document_roots[] = ABSPATH;
+		foreach ( $document_roots as $root ) {
+			if ( empty( $root ) ) {
+				continue;
+			}
+			$root = realpath( $root );
+			if ( false === $root ) {
+				continue;
+			}
+			$root = wp_normalize_path( $root );
+			if ( $root !== $file && 0 !== strpos( trailingslashit( $file ), trailingslashit( $root ) ) ) {
+				continue;
+			}
+
+			$relative_path = ltrim( substr( $file, strlen( trailingslashit( $root ) ) ), '/' );
+			$site_url_parts = wp_parse_url( home_url( '/' ) );
+			if ( empty( $site_url_parts['scheme'] ) || empty( $site_url_parts['host'] ) ) {
+				return '';
+			}
+			$origin = $site_url_parts['scheme'] . '://' . $site_url_parts['host'];
+			if ( ! empty( $site_url_parts['port'] ) ) {
+				$origin .= ':' . $site_url_parts['port'];
+			}
+			$encoded_path = implode( '/', array_map( 'rawurlencode', explode( '/', $relative_path ) ) );
+
+			return trailingslashit( $origin ) . $encoded_path;
 		}
 
-		$document_root = wp_normalize_path( $document_root );
-		if ( $document_root !== $file && 0 !== strpos( trailingslashit( $file ), trailingslashit( $document_root ) ) ) {
-			return trailingslashit( $this->upload_url ) . $this->upload_relative_file_path( $file );
-		}
-		$relative_path = ltrim( substr( $file, strlen( trailingslashit( $document_root ) ) ), '/' );
-		$site_url_parts = wp_parse_url( home_url( '/' ) );
-		$origin = $site_url_parts['scheme'] . '://' . $site_url_parts['host'];
-		if ( ! empty( $site_url_parts['port'] ) ) {
-			$origin .= ':' . $site_url_parts['port'];
-		}
-		$encoded_path = implode( '/', array_map( 'rawurlencode', explode( '/', $relative_path ) ) );
-
-		return trailingslashit( $origin ) . $encoded_path;
+		return '';
 	}
 
 	/**
@@ -927,23 +947,19 @@ class BulkMediaRegister {
 		$ext = $filetype['ext'];
 		$mime_type = $filetype['type'];
 		$file_type = wp_ext2type( $ext );
-		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
-		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
-		$wp_filesystem = new WP_Filesystem_Direct( false );
 
 		$title = wp_basename( $file, '.' . $ext );
 		/* for utf8mb4 charcter */
 		$title = $this->utf8mb4_html_numeric_encode( $title );
-		$filename_org = wp_basename( $file );
-		$foldername_org = rtrim( $file, $filename_org );
-		$filename = sanitize_file_name( $filename_org );
-		if ( $filename <> $filename_org ) {
-			$file_org = $file;
-			$file = $foldername_org . $filename;
-			$wp_filesystem->move( $file_org, $file );
+		$filename = wp_basename( $file );
+		if ( ! is_file( $file ) || ! is_readable( $file ) ) {
+			return new WP_Error( 'bulkmediaregister_file_unavailable', __( 'The file is no longer available or readable for registration.', 'bulk-media-register' ) );
 		}
 		$document_root = isset( $bulkmediaregister_settings['custom_document_root_base'] ) ? $bulkmediaregister_settings['custom_document_root_base'] : false;
 		$new_url_attach = $this->public_file_url( $file, $document_root );
+		if ( '' === $new_url_attach ) {
+			return new WP_Error( 'bulkmediaregister_file_url_unavailable', __( 'Could not create a public URL for the file beneath the configured document root.', 'bulk-media-register' ) );
+		}
 
 		/* File Regist */
 		$newfile_post = array(
@@ -1308,6 +1324,11 @@ class BulkMediaRegister {
 				/* Do not use an external UID; enforce the currently logged-in user ID. */
 				if ( is_file( $file ) ) {
 					$output = apply_filters( 'bmr_regist', $file, $uid );
+					if ( is_wp_error( $output ) ) {
+						status_header( 500 );
+						echo esc_html( $output->get_error_message() );
+						wp_die();
+					}
 
 					$output_html = '<div style="border-bottom: 1px solid; padding-top: 5px; padding-bottom: 5px;">';
 					$output_html .= '<img width="40" height="40" src="' . $output['image_thumbnail'] . '" style="float: left; margin: 5px;">';
