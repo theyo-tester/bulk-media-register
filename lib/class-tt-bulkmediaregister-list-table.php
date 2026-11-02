@@ -69,25 +69,27 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 	/** ==================================================
 	 * Read data
 	 *
+	 * @param array $files Files to render on the current page.
+	 * @return array
 	 * @since 1.10
 	 */
-	private function read_data() {
-
-		$files = get_user_option( 'bulkmediaregister_files', get_current_user_id() );
+	private function read_data( $files ) {
 
 		$bulkmediaregister = new BulkMediaRegister();
 
 		$bulkmediaregister_settings = get_user_option( 'bulkmediaregister', get_current_user_id() );
 		delete_user_option( get_current_user_id(), 'bulkmediaregister_lists_break' );
-		@set_time_limit( $bulkmediaregister_settings['max_execution_time'] );
+		$max_execution_time = isset( $bulkmediaregister_settings['max_execution_time'] ) ? absint( $bulkmediaregister_settings['max_execution_time'] ) : absint( ini_get( 'max_execution_time' ) );
+		@set_time_limit( $max_execution_time );
 		$start_time = time();
-		$exe_stop_diff_time = intval( ini_get( 'max_execution_time' ) * 0.8 );
+		$runtime_limit = absint( ini_get( 'max_execution_time' ) );
+		$exe_stop_diff_time = 0 < $runtime_limit ? max( 1, intval( $runtime_limit * 0.8 ) ) : 0;
 
 		$listtable_array = array();
 		if ( ! empty( $files ) ) {
 			$count = 0;
 			foreach ( $files as $file ) {
-				if ( time() - $start_time >= $exe_stop_diff_time ) {
+				if ( 0 < $exe_stop_diff_time && time() - $start_time >= $exe_stop_diff_time ) {
 					update_user_option( get_current_user_id(), 'bulkmediaregister_lists_break', true );
 					break;
 				}
@@ -640,7 +642,8 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * use sort and pagination data to build a custom query instead, as you'll
 		 * be able to use your precisely-queried data immediately.
 		 */
-		$data = $this->read_data();
+		$files = get_user_option( 'bulkmediaregister_files', get_current_user_id() );
+		$files = is_array( $files ) ? $files : array();
 
 		/**
 		 * This checks for sorting input and sorts the data in our array accordingly.
@@ -653,29 +656,37 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * @param array $a  a.
 		 * @param array $b  b.
 		 */
-		function usort_reorder( $a, $b ) {
-			/* If no sort, default to title */
-			$nonce = null;
-			if ( isset( $_REQUEST['_wpnonce'] ) && ! empty( $_REQUEST['_wpnonce'] ) ) {
-				$nonce = sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) );
-			}
-			if ( wp_verify_nonce( $nonce, 'bmrt_sort_nonce' ) ) {
-				if ( isset( $_REQUEST['orderby'] ) && ! empty( $_REQUEST['orderby'] ) ) {
-					$orderby = sanitize_text_field( wp_unslash( $_REQUEST['orderby'] ) );
-				} else {
-					$orderby = 'title';
+		$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : null;
+		$sortable_columns = array( 'title', 'datetime', 'filetype' );
+		$orderby = isset( $_REQUEST['orderby'] ) ? sanitize_key( wp_unslash( $_REQUEST['orderby'] ) ) : 'title';
+		$order = isset( $_REQUEST['order'] ) && 'desc' === strtolower( sanitize_text_field( wp_unslash( $_REQUEST['order'] ) ) ) ? 'desc' : 'asc';
+		if ( wp_verify_nonce( $nonce, 'bmrt_sort_nonce' ) && in_array( $orderby, $sortable_columns, true ) ) {
+			usort(
+				$files,
+				static function ( $file_a, $file_b ) use ( $orderby, $order ) {
+					switch ( $orderby ) {
+						case 'datetime':
+							$value_a = filemtime( $file_a );
+							$value_b = filemtime( $file_b );
+							break;
+						case 'filetype':
+							$value_a = wp_check_filetype( $file_a )['type'];
+							$value_b = wp_check_filetype( $file_b )['type'];
+							break;
+						default:
+							$value_a = wp_basename( $file_a );
+							$value_b = wp_basename( $file_b );
+					}
+					if ( is_int( $value_a ) && is_int( $value_b ) ) {
+						$result = $value_a < $value_b ? -1 : ( $value_a > $value_b ? 1 : 0 );
+					} else {
+						$result = strcasecmp( (string) $value_a, (string) $value_b );
+					}
+
+					return 'desc' === $order ? -$result : $result;
 				}
-				/* If no order, default to asc */
-				if ( isset( $_REQUEST['order'] ) && ! empty( $_REQUEST['order'] ) ) {
-					$order = sanitize_text_field( wp_unslash( $_REQUEST['order'] ) );
-				} else {
-					$order = 'asc';
-				}
-				$result = strcmp( $a[ $orderby ], $b[ $orderby ] ); /* Determine sort order */
-				return ( 'desc' === $order ) ? $result : -$result; /* Send final sort direction to usort */
-			}
+			);
 		}
-		usort( $data, 'usort_reorder' );
 
 		/***********************************************************************
 		 * ---------------------------------------------------------------------
@@ -703,15 +714,11 @@ class TT_BulkMediaRegister_List_Table extends WP_List_Table {
 		 * without filtering. We'll need this later, so you should always include it
 		 * in your own package classes.
 		 */
-		$total_items = count( $data );
+		$total_items = count( $files );
 		$this->max_items = $total_items;
 
-		/**
-		 * The WP_List_Table class does not handle pagination for us, so we need
-		 * to ensure that the data is trimmed to only the current page. We can use
-		 * array_slice() to
-		 */
-		$data = array_slice( $data, ( ( $current_page - 1 ) * $per_page ), $per_page );
+		$page_files = array_slice( $files, ( ( $current_page - 1 ) * $per_page ), $per_page );
+		$data = $this->read_data( $page_files );
 
 		/**
 		 * REQUIRED. Now we can add our *sorted* data to the items property, where
