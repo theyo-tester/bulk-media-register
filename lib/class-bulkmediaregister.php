@@ -110,29 +110,51 @@ class BulkMediaRegister {
 	 */
 	public function save_scan_files( $uid, $files ) {
 
+		global $wpdb;
+
 		$files = array_values( $files );
 		$old_manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
 		$old_chunk_count = is_array( $old_manifest ) && isset( $old_manifest['chunks'] ) ? absint( $old_manifest['chunks'] ) : 0;
 		$chunks = array_chunk( $files, 100 );
+		$chunk_index = 0;
+		$saved_file_count = 0;
 
-		foreach ( $chunks as $index => $chunk ) {
-			$option_name = 'bulkmediaregister_files_chunk_' . $index;
+		while ( ! empty( $chunks ) ) {
+			$chunk = array_shift( $chunks );
+			$option_name = 'bulkmediaregister_files_chunk_' . $chunk_index;
 			update_user_option( $uid, $option_name, $chunk );
 			if ( get_user_option( $option_name, $uid ) !== $chunk ) {
+				if ( 1 < count( $chunk ) ) {
+					$split_at = (int) ceil( count( $chunk ) / 2 );
+					$first_chunk = array_slice( $chunk, 0, $split_at );
+					$second_chunk = array_slice( $chunk, $split_at );
+					delete_user_option( $uid, $option_name );
+					array_unshift( $chunks, $first_chunk, $second_chunk );
+					continue;
+				}
+
+				for ( $index = 0; $index <= $chunk_index; ++$index ) {
+					delete_user_option( $uid, 'bulkmediaregister_files_chunk_' . $index );
+				}
+				$database_error = is_object( $wpdb ) && ! empty( $wpdb->last_error ) ? ' ' . $wpdb->last_error : '';
 				return new WP_Error(
 					'bulkmediaregister_scan_storage_failed',
 					sprintf(
-						/* translators: %d: result chunk number */
-						__( 'Could not save scan results in storage (chunk %d).', 'bulk-media-register' ),
-						$index + 1
+						/* translators: 1: path number, 2: total paths, 3: database error text */
+						__( 'Could not save scan result path %1$d of %2$d in storage.%3$s', 'bulk-media-register' ),
+						$saved_file_count + 1,
+						count( $files ),
+						$database_error
 					)
 				);
 			}
+			$saved_file_count += count( $chunk );
+			++$chunk_index;
 		}
 
 		$manifest = array(
 			'version' => 1,
-			'chunks' => count( $chunks ),
+			'chunks' => $chunk_index,
 			'count' => count( $files ),
 		);
 		update_user_option( $uid, 'bulkmediaregister_files_manifest', $manifest );
