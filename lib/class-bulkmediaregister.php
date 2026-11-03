@@ -157,7 +157,7 @@ class BulkMediaRegister {
 		if ( is_array( $old_manifest ) && isset( $old_manifest['file'] ) && is_string( $old_manifest['file'] ) && preg_match( '/^scan-results-[a-f0-9]{32}\.php$/', $old_manifest['file'] ) ) {
 			wp_delete_file( trailingslashit( $this->plugin_tmp_dir ) . $old_manifest['file'] );
 		}
-		$this->clear_legacy_scan_files( $uid );
+		delete_user_option( $uid, 'bulkmediaregister_files' );
 
 		return true;
 	}
@@ -199,37 +199,8 @@ class BulkMediaRegister {
 			return $files;
 		}
 
-		$manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
-		if ( false === $manifest ) {
-			$files = get_user_option( 'bulkmediaregister_files', $uid );
-			return is_array( $files ) ? $files : array();
-		}
-		if ( ! is_array( $manifest ) || ! isset( $manifest['version'], $manifest['chunks'], $manifest['count'] ) || 1 !== absint( $manifest['version'] ) ) {
-			return new WP_Error( 'bulkmediaregister_scan_storage_invalid', __( 'Saved scan results have an invalid storage manifest.', 'bulk-media-register' ) );
-		}
-
-		$files = array();
-		$chunk_count = absint( $manifest['chunks'] );
-		for ( $index = 0; $index < $chunk_count; ++$index ) {
-			$chunk = get_user_option( 'bulkmediaregister_files_chunk_' . $index, $uid );
-			if ( ! is_array( $chunk ) ) {
-				return new WP_Error(
-					'bulkmediaregister_scan_storage_incomplete',
-					sprintf(
-						/* translators: %d: result chunk number */
-						__( 'Saved scan results are incomplete (chunk %d is missing).', 'bulk-media-register' ),
-						$index + 1
-					)
-				);
-			}
-			$files = array_merge( $files, $chunk );
-		}
-
-		if ( count( $files ) !== absint( $manifest['count'] ) ) {
-			return new WP_Error( 'bulkmediaregister_scan_storage_incomplete', __( 'Saved scan results do not match their recorded file count.', 'bulk-media-register' ) );
-		}
-
-		return $files;
+		$files = get_user_option( 'bulkmediaregister_files', $uid );
+		return is_array( $files ) ? $files : array();
 	}
 
 	/**
@@ -246,24 +217,6 @@ class BulkMediaRegister {
 			unset( $settings['scan_results'] );
 			update_user_option( $uid, 'bulkmediaregister', $settings );
 		}
-		$this->clear_legacy_scan_files( $uid );
-	}
-
-	/**
-	 * Remove scan results saved by the earlier user-option formats.
-	 *
-	 * @param int $uid User ID.
-	 * @return void
-	 */
-	private function clear_legacy_scan_files( $uid ) {
-
-		$manifest = get_user_option( 'bulkmediaregister_files_manifest', $uid );
-		if ( is_array( $manifest ) && isset( $manifest['chunks'] ) ) {
-			for ( $index = 0; $index < absint( $manifest['chunks'] ); ++$index ) {
-				delete_user_option( $uid, 'bulkmediaregister_files_chunk_' . $index );
-			}
-		}
-		delete_user_option( $uid, 'bulkmediaregister_files_manifest' );
 		delete_user_option( $uid, 'bulkmediaregister_files' );
 	}
 
@@ -392,37 +345,53 @@ class BulkMediaRegister {
 
 		$upload_dir = wp_normalize_path( $upload_dir );
 		$search_dir = wp_normalize_path( $search_dir );
-		if ( $search_dir !== $upload_dir && 0 !== strpos( trailingslashit( $search_dir ), trailingslashit( $upload_dir ) ) ) {
-			return array();
-		}
-
-		$relative_dir = ltrim( substr( $search_dir, strlen( $upload_dir ) ), '/' );
+		$searching_uploads = $search_dir === $upload_dir || 0 === strpos( trailingslashit( $search_dir ), trailingslashit( $upload_dir ) );
+		$relative_dir = $searching_uploads ? ltrim( substr( $search_dir, strlen( $upload_dir ) ), '/' ) : '';
 		$sql = "
 			SELECT meta_value
 			FROM {$wpdb->prefix}postmeta
 			WHERE meta_key = '_wp_attached_file'
 		";
-		if ( '' !== $relative_dir ) {
+		if ( $searching_uploads && '' !== $relative_dir ) {
 			$sql .= $wpdb->prepare( ' AND meta_value LIKE %s', $wpdb->esc_like( $relative_dir . '/' ) . '%' );
+		} elseif ( ! $searching_uploads ) {
+			$sql .= $wpdb->prepare( ' AND meta_value LIKE %s', $wpdb->esc_like( trailingslashit( $search_dir ) ) . '%' );
 		}
 		$files = $wpdb->get_col( $sql );
 
 		$exclude_files = array();
 		foreach ( $files as $file ) {
-			$file1 = wp_normalize_path( trailingslashit( $this->upload_dir ) . $file );
+			$file1 = $searching_uploads
+				? wp_normalize_path( trailingslashit( $this->upload_dir ) . $file )
+				: wp_normalize_path( $file );
 			$exclude_files[ $file1 ] = true;
 			if ( strpos( $file, '-scaled.' ) ) {
 				$basename1 = wp_basename( $file );
 				$filetype = wp_check_filetype( $basename1 );
 				$scaled = '-scaled.' . $filetype['ext'];
-				$file2 = rtrim( $file1, $scaled ) . '.' . $filetype['ext'];
+				$file2 = substr( $file1, 0, -strlen( $scaled ) ) . '.' . $filetype['ext'];
 				$exclude_files[ $file2 ] = true;
 			} else if ( strpos( $file, '-rotated.' ) ) {
 				$basename1 = wp_basename( $file );
 				$filetype = wp_check_filetype( $basename1 );
 				$rotated = '-rotated.' . $filetype['ext'];
-				$file2 = rtrim( $file1, $rotated ) . '.' . $filetype['ext'];
+				$file2 = substr( $file1, 0, -strlen( $rotated ) ) . '.' . $filetype['ext'];
 				$exclude_files[ $file2 ] = true;
+			}
+		}
+
+		if ( ! $searching_uploads && ( $search_dir === $upload_dir || 0 === strpos( trailingslashit( $upload_dir ), trailingslashit( $search_dir ) ) ) ) {
+			$relative_files = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT meta_value FROM {$wpdb->prefix}postmeta WHERE meta_key = %s",
+					'_wp_attached_file'
+				)
+			);
+			foreach ( $relative_files as $file ) {
+				$file_path = wp_normalize_path( trailingslashit( $upload_dir ) . $file );
+				if ( 0 === strpos( trailingslashit( $file_path ), trailingslashit( $search_dir ) ) ) {
+					$exclude_files[ $file_path ] = true;
+				}
 			}
 		}
 
@@ -968,6 +937,26 @@ class BulkMediaRegister {
 		$uploads_root = false !== $uploads_root ? wp_normalize_path( $uploads_root ) : '';
 		$is_uploads_file = '' !== $uploads_root && 0 === strpos( trailingslashit( $file ), trailingslashit( $uploads_root ) );
 		$metapath_name = $is_uploads_file ? ltrim( substr( $file, strlen( trailingslashit( $uploads_root ) ) ), '/' ) : $file;
+		$duplicate_paths = array( $metapath_name );
+		$path_extension = pathinfo( $metapath_name, PATHINFO_EXTENSION );
+		if ( '' !== $path_extension ) {
+			$path_directory = dirname( $metapath_name );
+			$path_prefix = '.' === $path_directory ? '' : trailingslashit( $path_directory );
+			$path_basename = wp_basename( $metapath_name, '.' . $path_extension );
+			$duplicate_paths[] = $path_prefix . $path_basename . '-scaled.' . $path_extension;
+			$duplicate_paths[] = $path_prefix . $path_basename . '-rotated.' . $path_extension;
+		}
+		global $wpdb;
+		$path_matches = array();
+		foreach ( $duplicate_paths as $duplicate_path ) {
+			$path_matches[] = $wpdb->prepare( 'postmeta.meta_value = %s', $duplicate_path );
+		}
+		$existing_attachment = $wpdb->get_var(
+			"SELECT postmeta.post_id FROM {$wpdb->postmeta} AS postmeta INNER JOIN {$wpdb->posts} AS posts ON posts.ID = postmeta.post_id WHERE postmeta.meta_key = '_wp_attached_file' AND (" . implode( ' OR ', $path_matches ) . ") AND posts.post_type = 'attachment' LIMIT 1"
+		);
+		if ( $existing_attachment ) {
+			return new WP_Error( 'bulkmediaregister_file_already_registered', __( 'This file is already registered in the Media Library.', 'bulk-media-register' ) );
+		}
 
 		$date_set = isset( $bulkmediaregister_settings['dateset'] ) ? $bulkmediaregister_settings['dateset'] : 'new';
 		if ( 'server' === $date_set ) {

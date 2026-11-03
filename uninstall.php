@@ -22,13 +22,6 @@ if ( ! is_multisite() ) {
 			$uploads = wp_upload_dir();
 			wp_delete_file( trailingslashit( $uploads['basedir'] ) . 'bulk-media-register-tmp/' . $bulkmediaregister_settings['scan_results']['file'] );
 		}
-		$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
-		if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
-			for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
-				delete_user_option( $user->ID, 'bulkmediaregister_files_chunk_' . $chunk, false );
-			}
-		}
-		delete_user_option( $user->ID, 'bulkmediaregister_files_manifest', false );
 		delete_user_option( $user->ID, 'bulkmediaregister', false );
 		delete_user_option( $user->ID, 'bulkmediaregister_files', false );
 		delete_user_option( $user->ID, 'bulkmediaregister_output', false );
@@ -61,13 +54,6 @@ if ( ! is_multisite() ) {
 				$uploads = wp_upload_dir();
 				wp_delete_file( trailingslashit( $uploads['basedir'] ) . 'bulk-media-register-tmp/' . $bulkmediaregister_settings['scan_results']['file'] );
 			}
-			$files_manifest = get_user_option( 'bulkmediaregister_files_manifest', $user->ID );
-			if ( is_array( $files_manifest ) && isset( $files_manifest['chunks'] ) ) {
-				for ( $chunk = 0; $chunk < absint( $files_manifest['chunks'] ); ++$chunk ) {
-					delete_user_option( $user->ID, 'bulkmediaregister_files_chunk_' . $chunk, false );
-				}
-			}
-			delete_user_option( $user->ID, 'bulkmediaregister_files_manifest', false );
 			delete_user_option( $user->ID, 'bulkmediaregister', false );
 			delete_user_option( $user->ID, 'bulkmediaregister_files', false );
 			delete_user_option( $user->ID, 'bulkmediaregister_output', false );
