@@ -39,7 +39,9 @@ class BulkMediaRegisterCronAdmin {
 	public function __construct() {
 
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
-		add_filter( 'cron_schedules', array( $this, 'bulkmediaregister_add_intervals' ) );
+		if ( function_exists( 'get_userdata' ) ) {
+			add_filter( 'cron_schedules', array( $this, 'bulkmediaregister_add_intervals' ) );
+		}
 		add_action( 'bmr_cron_page', array( $this, 'cron_admin_page' ), 10, 1 );
 	}
 
