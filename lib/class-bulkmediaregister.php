@@ -67,6 +67,20 @@ class BulkMediaRegister {
 	 */
 	public $plugin_tmp_dir;
 
+	/**
+	 * External source files to preserve during attachment deletion.
+	 *
+	 * @var array
+	 */
+	private $external_source_files_to_preserve = array();
+
+	/**
+	 * Generated main image files to remove after attachment deletion.
+	 *
+	 * @var array
+	 */
+	private $external_image_derivatives_to_delete = array();
+
 	/** ==================================================
 	 * Construct
 	 *
@@ -99,6 +113,88 @@ class BulkMediaRegister {
 		/* for robots_txt */
 		add_filter( 'robots_txt', array( $this, 'custom_robots_txt' ), 9999 );
 		add_filter( 'wp_get_attachment_url', array( $this, 'external_attachment_url' ), 10, 2 );
+		add_action( 'delete_attachment', array( $this, 'preserve_external_attachment_source' ), 10, 2 );
+		add_action( 'deleted_post', array( $this, 'delete_external_image_derivative' ), 10, 2 );
+		add_filter( 'wp_delete_file', array( $this, 'filter_external_source_file_deletion' ) );
+	}
+
+	/**
+	 * Preserve the external source while WordPress deletes an attachment and its generated sizes.
+	 *
+	 * @param int     $attach_id Attachment ID.
+	 * @param WP_Post $post      Attachment post.
+	 * @return void
+	 */
+	public function preserve_external_attachment_source( $attach_id, $post ) {
+
+		$this->external_source_files_to_preserve = array();
+		if ( empty( get_post_meta( $attach_id, '_bulkmediaregister_external_url', true ) ) ) {
+			return;
+		}
+
+		$file = get_attached_file( $attach_id );
+		if ( ! $file ) {
+			return;
+		}
+
+		$metadata = wp_get_attachment_metadata( $attach_id );
+		$source_file = get_post_meta( $attach_id, '_bulkmediaregister_source_file', true );
+		if ( ! is_string( $source_file ) || '' === $source_file ) {
+			$source_file = $file;
+			if ( ! empty( $metadata['original_image'] ) && is_string( $metadata['original_image'] ) && ! empty( $metadata['file'] ) && is_string( $metadata['file'] ) ) {
+				$source_file = path_join( dirname( $metadata['file'] ), $metadata['original_image'] );
+			}
+		}
+
+		$this->external_source_files_to_preserve = array( $this->normalize_file_path( $source_file ) => true );
+		$main_file = $this->normalize_file_path( $file );
+		if ( wp_attachment_is_image( $attach_id ) && $main_file !== $this->normalize_file_path( $source_file ) ) {
+			$this->external_image_derivatives_to_delete[ $attach_id ] = $file;
+		}
+	}
+
+	/**
+	 * Delete an external image's generated main file after its attachment record is deleted.
+	 *
+	 * @param int     $post_id Deleted post ID.
+	 * @param WP_Post $post    Deleted post.
+	 * @return void
+	 */
+	public function delete_external_image_derivative( $post_id, $post ) {
+
+		if ( isset( $this->external_image_derivatives_to_delete[ $post_id ] ) ) {
+			wp_delete_file( $this->external_image_derivatives_to_delete[ $post_id ] );
+			unset( $this->external_image_derivatives_to_delete[ $post_id ] );
+		}
+	}
+
+	/**
+	 * Keep WordPress from deleting an external attachment's original source file.
+	 *
+	 * @param string $file File path passed to wp_delete_file().
+	 * @return string
+	 */
+	public function filter_external_source_file_deletion( $file ) {
+
+		$file = $this->normalize_file_path( $file );
+		if ( isset( $this->external_source_files_to_preserve[ $file ] ) ) {
+			return '';
+		}
+		return $file;
+	}
+
+	/**
+	 * Normalize a filesystem path and its canonical form for matching.
+	 *
+	 * @param string $file Filesystem path.
+	 * @return string
+	 */
+	private function normalize_file_path( $file ) {
+
+		$file = wp_normalize_path( $file );
+		$real_file = realpath( $file );
+
+		return false !== $real_file ? wp_normalize_path( $real_file ) : $file;
 	}
 
 	/**
@@ -992,6 +1088,7 @@ class BulkMediaRegister {
 		update_post_meta( $attach_id, '_wp_attached_file', $metapath_name );
 		if ( ! $is_uploads_file ) {
 			update_post_meta( $attach_id, '_bulkmediaregister_external_url', $new_url_attach );
+			update_post_meta( $attach_id, '_bulkmediaregister_source_file', $file );
 		}
 
 		/* for wp_read_audio_metadata and wp_read_video_metadata */

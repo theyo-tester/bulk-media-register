@@ -209,6 +209,7 @@ class BulkMediaRegisterAdmin {
 			?>
 		</h2>
 		<div style="clear: both;"></div>
+		<div class="notice notice-info inline"><p><?php esc_html_e( 'When you delete an externally registered attachment from the Media Library, its original file remains in its external folder. Generated image sizes are removed.', 'bulk-media-register' ); ?></p></div>
 
 		<div class="wrap">
 			<div id="bulkmediaregister-loading-container">
@@ -370,6 +371,7 @@ class BulkMediaRegisterAdmin {
 			?>
 		</h2>
 		<div style="clear: both;"></div>
+		<div class="notice notice-info inline"><p><?php esc_html_e( 'When you delete an externally registered attachment from the Media Library, its original file remains in its external folder. Generated image sizes are removed.', 'bulk-media-register' ); ?></p></div>
 
 		<div class="wrap">
 			<div id="selectmediaregister-loading-container">
